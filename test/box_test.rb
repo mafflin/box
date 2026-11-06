@@ -127,7 +127,28 @@ class BoxTest < Minitest::Test
     shown = plain(stdout).lines.drop(1).map { |line| line.split.last }
 
     assert_equal ['0123456789ab:/cache', "#{@home}x/other:/other", 'tmpfs:/tmp', '/data:/srv:ro'], shown
+    # Gray mounts, the working directory in the text color
+    assert_includes stdout, "\e[90m/data:\e[0m/srv\e[90m:ro\e[0m"
+  end
+
+  def test_list_uses_the_settings_theme
+    running('web' => details(workdir: '/srv', mounts: [bind('/data', '/srv', writable: false)]))
+    settings("[theme]\nmounts = \"default\"\nworkdir = \"magenta\"\nname = 208\n")
+
+    stdout, = box('list', 'containers', '--extended')
+
     assert_includes stdout, "/data:\e[35m/srv\e[0m:ro"
+    assert_includes stdout, "\e[38;5;208mweb\e[0m"
+  end
+
+  def test_list_fails_on_a_wrong_theme
+    settings("[theme]\nimage = \"pink\"\n")
+
+    _, stderr, status = box('list', 'containers')
+
+    refute status.success?
+    assert_match(%r{\Abox: invalid .*/box/settings.toml: .*unknown color pink}m, stderr)
+    assert_empty docker_calls
   end
 
   def test_list_images_prints_a_table
@@ -181,7 +202,15 @@ class BoxTest < Minitest::Test
 
   def box(*, path: "#{FAKE_BIN}:#{ENV.fetch('PATH')}", env: {})
     File.write(File.join(@tmp_dir, 'responses.json'), JSON.generate(@responses))
-    Open3.capture3({ 'PATH' => path, 'HOME' => @home, 'FAKE_DOCKER_DIR' => @tmp_dir, **env }, BOX, *)
+    # Without XDG_CONFIG_HOME, so the settings are the ones under HOME
+    env = { 'PATH' => path, 'HOME' => @home, 'XDG_CONFIG_HOME' => nil, 'FAKE_DOCKER_DIR' => @tmp_dir, **env }
+    Open3.capture3(env, BOX, *)
+  end
+
+  def settings(toml)
+    directory = File.join(@home, '.config', 'box')
+    FileUtils.mkdir_p(directory)
+    File.write(File.join(directory, 'settings.toml'), toml)
   end
 
   def respond(*arguments, stdout: '', status: 0)

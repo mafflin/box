@@ -9,6 +9,8 @@ pub use stop::stop;
 
 use crate::cli::Command;
 use crate::docker::{self, Docker, Terminal};
+use crate::settings::Settings;
+use crate::theme::Theme;
 use crate::{Result, print};
 
 /// Each container's image ID
@@ -34,14 +36,20 @@ impl ListTarget {
 
 /// Runs a command that needs docker
 pub fn run(command: Command) -> Result<()> {
+    // Before docker, as for the dashboard, and only where it's used, so a broken file can't stop a prune
+    let theme = if matches!(command, Command::List { .. }) {
+        Settings::load()?.theme
+    } else {
+        Theme::default()
+    };
     docker::check()?;
     let docker = Terminal;
     match command {
         Command::List { target, extended } => {
             let table = match target {
-                ListTarget::Containers => list::containers(&docker, extended)?,
-                ListTarget::Images => list::images(&docker)?,
-                ListTarget::Volumes => list::volumes(&docker)?,
+                ListTarget::Containers => list::containers(&docker, extended, &theme)?,
+                ListTarget::Images => list::images(&docker, &theme)?,
+                ListTarget::Volumes => list::volumes(&docker, &theme)?,
             };
             print(&table);
         }

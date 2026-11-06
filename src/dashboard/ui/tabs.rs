@@ -4,7 +4,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
 
-use super::{bold, fg, put, put_right};
+use super::{badge, bold, fg, put, put_right};
 use crate::dashboard::app::{App, View};
 
 pub fn draw(buf: &mut Buffer, area: Rect, app: &App) {
@@ -14,9 +14,9 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App) {
     for view in View::ALL {
         let label = format!(" {} {} ", view.title(), counts[view.index()]);
         let style = if view == app.view {
-            bold(theme.on_color).bg(theme.accent)
+            badge(theme.accent)
         } else {
-            fg(theme.muted).bg(theme.bg_bar)
+            fg(theme.muted).bg(theme.bar)
         };
         x = put(buf, x, area.y, &label, style, area.right()) + 1;
     }
@@ -29,10 +29,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App) {
     if app.disconnected.is_some() {
         groups.push((
             3,
-            vec![Span::styled(
-                " disconnected · retrying ",
-                bold(theme.on_color).bg(theme.red),
-            )],
+            vec![Span::styled(" disconnected · retrying ", badge(theme.red))],
         ));
     }
     groups.push((

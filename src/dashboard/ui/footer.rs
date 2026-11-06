@@ -6,7 +6,7 @@ use ratatui::text::Span;
 
 use super::{bold, fg, fill, put, put_right, width};
 use crate::dashboard::app::{App, Tone, View};
-use crate::dashboard::theme::Theme;
+use crate::theme::Theme;
 
 /// Between the selection's keys and the list's
 const SEPARATOR: &str = "  │  ";
@@ -42,7 +42,7 @@ const PINNED: [Hint; 2] = [hint("?", "help", u8::MAX), hint("q", "quit", u8::MAX
 
 pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
     let theme = app.theme;
-    fill(buf, area, theme.muted, theme.bg_bar);
+    fill(buf, area, theme.muted, theme.bar);
 
     let toast = app.toast.as_ref().map(|toast| {
         let color = match toast.tone {

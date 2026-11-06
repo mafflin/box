@@ -6,45 +6,45 @@ use anyhow::Context;
 
 use super::{CONTAINER_IMAGE_FORMAT, all_containers};
 use crate::Result;
-use crate::colors;
 use crate::docker::{Docker, Mount, reference, shown_user, shown_workdir};
 use crate::format::{self, short_id};
 use crate::table::{self, Cell, Column, cell, lines};
+use crate::theme::Theme;
 
 const FIELD_SEPARATOR: &str = "\t";
 
 const CONTAINER_COLUMNS: [Column; 6] = [
-    Column::left("NAME", colors::NAME),
-    Column::left("IMAGE", colors::IMAGE),
-    Column::left("USER", colors::USER),
-    Column::left("STATUS", colors::STATUS),
-    Column::left("PORTS", colors::PORTS),
-    Column::left("WORKDIR", colors::WORKDIR),
+    Column::left("NAME", |theme| theme.name),
+    Column::left("IMAGE", |theme| theme.image),
+    Column::left("USER", |theme| theme.user),
+    Column::left("STATUS", |theme| theme.status),
+    Column::left("PORTS", |theme| theme.ports),
+    Column::left("WORKDIR", |theme| theme.workdir),
 ];
 
 const EXTENDED_CONTAINER_COLUMNS: [Column; 7] = [
-    Column::left("NAME", colors::NAME),
-    Column::left("IMAGE", colors::IMAGE),
-    Column::left("USER", colors::USER),
-    Column::left("STATUS", colors::STATUS),
-    Column::left("IP", colors::IP),
-    Column::left("PORTS", colors::PORTS),
-    Column::left("MOUNTS", colors::MOUNTS),
+    Column::left("NAME", |theme| theme.name),
+    Column::left("IMAGE", |theme| theme.image),
+    Column::left("USER", |theme| theme.user),
+    Column::left("STATUS", |theme| theme.status),
+    Column::left("IP", |theme| theme.ip),
+    Column::left("PORTS", |theme| theme.ports),
+    Column::left("MOUNTS", |theme| theme.mounts),
 ];
 
 const IMAGE_COLUMNS: [Column; 5] = [
-    Column::left("IMAGE", colors::IMAGE),
-    Column::left("ID", colors::ID),
-    Column::right("SIZE", colors::SIZE),
-    Column::right("CREATED", colors::CREATED),
-    Column::right("CONTAINERS", colors::COUNT),
+    Column::left("IMAGE", |theme| theme.image),
+    Column::left("ID", |theme| theme.id),
+    Column::right("SIZE", |theme| theme.size),
+    Column::right("CREATED", |theme| theme.created),
+    Column::right("CONTAINERS", |theme| theme.count),
 ];
 
 const VOLUME_COLUMNS: [Column; 4] = [
-    Column::left("VOLUME", colors::NAME),
-    Column::left("DRIVER", colors::DRIVER),
-    Column::right("CREATED", colors::CREATED),
-    Column::right("CONTAINERS", colors::COUNT),
+    Column::left("VOLUME", |theme| theme.name),
+    Column::left("DRIVER", |theme| theme.driver),
+    Column::right("CREATED", |theme| theme.created),
+    Column::right("CONTAINERS", |theme| theme.count),
 ];
 
 const CONTAINER_FIELDS: [&str; 6] = [
@@ -72,7 +72,7 @@ const CONTAINER_VOLUMES_FORMAT: &str =
 const VOLUME_FIELDS: [&str; 3] = ["{{.Name}}", "{{.Driver}}", "{{.CreatedAt}}"];
 
 /// Running containers, with their IPs and mounts instead of the working directory when extended
-pub fn containers(docker: &impl Docker, extended: bool) -> Result<String> {
+pub fn containers(docker: &impl Docker, extended: bool, theme: &Theme) -> Result<String> {
     let containers = records(docker, &["ps"], &CONTAINER_STATUS_FIELDS, &[])?;
     if containers.is_empty() {
         return Ok(String::new());
@@ -125,11 +125,11 @@ pub fn containers(docker: &impl Docker, extended: bool) -> Result<String> {
     } else {
         &CONTAINER_COLUMNS
     };
-    Ok(table::render(columns, &rows))
+    Ok(table::render(columns, &rows, theme))
 }
 
 /// Images and how many containers use them
-pub fn images(docker: &impl Docker) -> Result<String> {
+pub fn images(docker: &impl Docker, theme: &Theme) -> Result<String> {
     let containers_by_image = tally(all_containers(docker, CONTAINER_IMAGE_FORMAT)?);
     let rows: Vec<Vec<Cell>> = records(docker, &["image", "ls", "--no-trunc"], &IMAGE_FIELDS, &[])?
         .into_iter()
@@ -146,11 +146,11 @@ pub fn images(docker: &impl Docker) -> Result<String> {
             ]
         })
         .collect();
-    Ok(table::render(&IMAGE_COLUMNS, &rows))
+    Ok(table::render(&IMAGE_COLUMNS, &rows, theme))
 }
 
 /// Volumes and how many containers use them
-pub fn volumes(docker: &impl Docker) -> Result<String> {
+pub fn volumes(docker: &impl Docker, theme: &Theme) -> Result<String> {
     let names = docker.lines(&["volume", "ls", "-q"])?;
     if names.is_empty() {
         return Ok(String::new());
@@ -178,7 +178,7 @@ pub fn volumes(docker: &impl Docker) -> Result<String> {
             ]
         })
         .collect();
-    Ok(table::render(&VOLUME_COLUMNS, &rows))
+    Ok(table::render(&VOLUME_COLUMNS, &rows, theme))
 }
 
 /// Each output line's fields, as many as asked for, the last one taking the rest

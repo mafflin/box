@@ -1,2 +1,0 @@
-# box dashboard settings, read from ~/.config/box/settings.yml ($XDG_CONFIG_HOME/box/ if set)
-# accent: yellow # optional: yellow, red, green, blue, magenta or cyan

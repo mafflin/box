@@ -4,7 +4,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 
-use super::{bold, fg, put, put_line, rounded_box};
+use super::{badge, bold, fg, put, put_line, rounded_box};
 use crate::dashboard::app::{App, Level};
 
 pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
@@ -71,15 +71,15 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
 
     let newer = length - end;
     if logs.view.is_some() && newer > 0 {
-        let badge = format!(" ↓ {newer} newer ");
-        let width = u16::try_from(badge.chars().count()).unwrap_or(0);
+        let label = format!(" ↓ {newer} newer ");
+        let width = u16::try_from(label.chars().count()).unwrap_or(0);
         let x = area.right().saturating_sub(2 + width);
         put(
             buf,
             x,
             area.bottom() - 1,
-            &badge,
-            bold(theme.on_color).bg(theme.yellow),
+            &label,
+            badge(theme.yellow),
             area.right() - 1,
         );
     }

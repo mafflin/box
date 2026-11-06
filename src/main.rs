@@ -1,5 +1,4 @@
 mod cli;
-mod colors;
 mod commands;
 mod dashboard;
 mod docker;
@@ -7,6 +6,7 @@ mod format;
 mod paths;
 mod settings;
 mod table;
+mod theme;
 
 use std::io::{IsTerminal, Write};
 use std::process::ExitCode;

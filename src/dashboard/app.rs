@@ -5,10 +5,10 @@ use std::time::{Duration, Instant};
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::theme::Theme;
 use crate::commands::PruneTarget;
 use crate::docker::{Container, Image, Stats, Volume};
 use crate::format;
+use crate::theme::Theme;
 
 const HISTORY: usize = 240;
 const MAX_LOG_LINES: usize = 5000;

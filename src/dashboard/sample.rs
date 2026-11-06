@@ -3,9 +3,8 @@
 use std::time::Instant;
 
 use super::app::{Action, App, Snapshot};
-use super::theme::Theme;
 use crate::docker::{Container, Image, Mount, Stats, Volume};
-use crate::settings::Accent;
+use crate::theme::Theme;
 
 const MIB: u64 = 1024 * 1024;
 /// When the sample's statuses were taken, in seconds since the epoch
@@ -257,7 +256,7 @@ fn stats(app: &mut App, id: &str, cpu: f64, memory: u64, memory_limit: u64) {
 }
 
 pub fn app() -> App {
-    let mut app = App::new(Theme::new(Accent::Yellow), Instant::now());
+    let mut app = App::new(Theme::default(), Instant::now());
     app.update(Action::Snapshot(Ok(snapshot())), Instant::now());
     stats(&mut app, "api-id", 18.0, 649 * MIB, 2 * GIB);
     stats(&mut app, "db-id", 6.0, 311 * MIB, 16 * GIB);

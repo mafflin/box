@@ -4,7 +4,6 @@ mod app;
 mod collector;
 #[cfg(test)]
 mod sample;
-mod theme;
 mod ui;
 
 use std::io::{self, stdout};
@@ -27,7 +26,6 @@ use crate::settings::Settings;
 use crate::{Result, docker, format};
 use app::{Action, App, Effect};
 use collector::Collector;
-use theme::Theme;
 
 /// How often old messages are checked for
 const TICK: Duration = Duration::from_millis(250);
@@ -43,7 +41,7 @@ pub fn run() -> Result<()> {
     let settings = Settings::load()?;
     docker::check()?;
 
-    let theme = Theme::new(settings.accent);
+    let theme = settings.theme;
     let (actions, updates) = mpsc::channel();
     let mut collector = Collector::start(actions.clone());
     let input = read_input(actions);

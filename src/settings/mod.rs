@@ -1,50 +1,26 @@
-//! The dashboard's settings file, `~/.config/box/settings.yml`
+//! The settings file, `~/.config/box/settings.toml`
 
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use serde::Deserialize;
 
+use crate::theme::Theme;
 use crate::{Result, paths};
 
 #[cfg(test)]
-const EXAMPLE: &str = include_str!("example.yml");
+const EXAMPLE: &str = include_str!("example.toml");
 
 pub fn path() -> PathBuf {
     paths::xdg_dir("XDG_CONFIG_HOME", ".config")
         .join("box")
-        .join("settings.yml")
-}
-
-/// The dashboard's accent color, one of the terminal's ANSI colors
-#[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum Accent {
-    #[default]
-    Yellow,
-    Red,
-    Green,
-    Blue,
-    Magenta,
-    Cyan,
+        .join("settings.toml")
 }
 
 #[derive(Deserialize, Default, PartialEq, Debug)]
-#[serde(
-    default,
-    deny_unknown_fields,
-    expecting = "a mapping like accent: yellow"
-)]
+#[serde(default, deny_unknown_fields)]
 pub struct Settings {
-    #[serde(deserialize_with = "or_default")]
-    pub accent: Accent,
-}
-
-/// The default for null, like `accent:` with nothing after it
-fn or_default<'de, D: serde::Deserializer<'de>, T: Deserialize<'de> + Default>(
-    deserializer: D,
-) -> std::result::Result<T, D::Error> {
-    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+    pub theme: Theme,
 }
 
 impl Settings {
@@ -63,12 +39,8 @@ fn read(path: &Path) -> Result<Settings> {
     parse(&content).with_context(|| format!("invalid {}", path.display()))
 }
 
-/// Only the first document, the defaults when there's none or it's empty
-fn parse(content: &str) -> std::result::Result<Settings, serde_norway::Error> {
-    let Some(document) = serde_norway::Deserializer::from_str(content).next() else {
-        return Ok(Settings::default());
-    };
-    Ok(Option::<Settings>::deserialize(document)?.unwrap_or_default())
+fn parse(content: &str) -> std::result::Result<Settings, toml::de::Error> {
+    toml::from_str(content)
 }
 
 #[cfg(test)]
@@ -80,44 +52,41 @@ mod tests {
     }
 
     #[test]
-    fn example_parses_to_the_defaults() {
+    fn example_lists_the_defaults() {
         assert_eq!(parse(EXAMPLE).unwrap(), Settings::default());
+        // Its commented-out theme, uncommented
+        let start = EXAMPLE.find("# [theme]").unwrap();
+        let theme: Vec<&str> = EXAMPLE[start..]
+            .lines()
+            .map(|line| line.strip_prefix("# ").unwrap_or(line))
+            .collect();
+        assert!(theme.iter().any(|line| line.starts_with("memory = ")));
+        assert_eq!(parse(&theme.join("\n")).unwrap(), Settings::default());
     }
 
     #[test]
     fn empty_settings() {
-        for empty in ["", "# comment\n", "~\n", "accent: ~\n", "accent:\n"] {
+        for empty in ["", "# comment\n", "[theme]\n"] {
             assert_eq!(parse(empty).unwrap(), Settings::default(), "{empty:?}");
         }
     }
 
     #[test]
-    fn accents() {
-        assert_eq!(parse("accent: cyan\n").unwrap().accent, Accent::Cyan);
-        assert_eq!(
-            parse("accent: red\n---\naccent: 1\n").unwrap().accent,
-            Accent::Red
-        );
-        let message = error("accent: pink\n");
-        assert!(
-            message.contains("accent: unknown variant `pink`, expected one of `yellow`"),
-            "{message}"
-        );
-        assert!(
-            error("accent: 5\n").contains("accent: "),
-            "{}",
-            error("accent: 5\n")
-        );
+    fn themes() {
+        let settings = parse("[theme]\nimage = \"cyan\"\n").unwrap();
+        assert_eq!(settings.theme.image, ratatui::style::Color::Cyan);
+        // Shows the line, with the value marked
+        let message = error("[theme]\nname = \"default\"\nimage = \"pink\"\n");
+        assert!(message.contains("line 3"), "{message}");
+        assert!(message.contains("image = \"pink\""), "{message}");
+        assert!(message.contains("unknown color pink"), "{message}");
     }
 
     #[test]
     fn unknown_keys() {
-        let message = error("accnt: red\n");
-        assert!(message.contains("unknown field `accnt`"), "{message}");
-        let message = error("- red\n");
-        assert!(
-            message.contains("expected a mapping like accent: yellow"),
-            "{message}"
-        );
+        let message = error("accent = \"red\"\n");
+        assert!(message.contains("unknown field `accent`"), "{message}");
+        let message = error("theme = \"red\"\n");
+        assert!(message.contains("invalid type"), "{message}");
     }
 }

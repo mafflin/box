@@ -7,11 +7,10 @@ use ratatui::text::{Line, Span};
 
 use super::table::{fraction, state_color};
 use super::{bold, fg, fill, put, put_line, rounded_box};
-use crate::colors;
 use crate::dashboard::app::{App, History, View};
-use crate::dashboard::theme::Theme;
 use crate::docker::{Container, Image, Volume};
 use crate::format::{self, compact_bytes};
+use crate::theme::Theme;
 
 const LABEL_WIDTH: usize = 9;
 const EIGHTHS: [&str; 9] = [" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
@@ -140,7 +139,7 @@ fn container_lines(app: &App, container: &Container) -> Vec<Line<'static>> {
     let value = fg(theme.text);
     let empty = fg(theme.dim);
     let mut lines = Lines::new(&theme);
-    lines.text("image", &container.image, fg(colors::IMAGE), empty);
+    lines.text("image", &container.image, fg(theme.image), empty);
     let status = app.pending(container).map_or_else(
         || container.status.clone(),
         |pending| pending.label().to_string(),
@@ -156,11 +155,11 @@ fn container_lines(app: &App, container: &Container) -> Vec<Line<'static>> {
             .map(|item| vec![Span::styled(item.clone(), fg(color))])
             .collect()
     };
-    lines.add("ip", list(&container.ips, colors::IP), empty);
-    lines.text("user", container.shown_user(), fg(colors::USER), empty);
+    lines.add("ip", list(&container.ips, theme.ip), empty);
+    lines.text("user", container.shown_user(), fg(theme.user), empty);
     let workdir = container.shown_workdir();
-    lines.text("workdir", workdir, fg(colors::WORKDIR), empty);
-    lines.add("ports", list(&container.ports, colors::PORTS), empty);
+    lines.text("workdir", workdir, fg(theme.workdir), empty);
+    lines.add("ports", list(&container.ports, theme.ports), empty);
     // Plain, as the workdir has its own line
     let mounts = container
         .mounts
@@ -201,7 +200,7 @@ fn image_lines(app: &App, image: &Image) -> Vec<Line<'static>> {
     let theme = app.theme;
     let (value, empty) = (fg(theme.text), fg(theme.dim));
     let mut lines = Lines::new(&theme);
-    lines.text("id", &image.id, fg(colors::ID), empty);
+    lines.text("id", &image.id, fg(theme.id), empty);
     if image.is_foreign(&app.host) {
         let platform = format!("{} · host is {}", image.platform, app.host);
         lines.text("platform", platform, fg(theme.yellow), empty);
@@ -218,13 +217,13 @@ fn image_lines(app: &App, image: &Image) -> Vec<Line<'static>> {
     tags.sort();
     let tags: Vec<Vec<Span<'static>>> = tags
         .into_iter()
-        .map(|tag| vec![Span::styled(tag, fg(colors::IMAGE))])
+        .map(|tag| vec![Span::styled(tag, fg(theme.image))])
         .collect();
     if tags.len() > 1 {
         lines.add("tags", tags, empty);
     }
-    lines.text("size", &image.size, fg(colors::SIZE), empty);
-    lines.text("created", &image.created_since, fg(colors::CREATED), empty);
+    lines.text("size", &image.size, fg(theme.size), empty);
+    lines.text("created", &image.created_since, fg(theme.created), empty);
     let used_by = users(app, &app.image_users(image), |container| {
         format!("  {}", container.status)
     });
@@ -246,11 +245,11 @@ fn image_lines(app: &App, image: &Image) -> Vec<Line<'static>> {
         let ports = image
             .ports
             .iter()
-            .map(|port| vec![Span::styled(port.clone(), fg(colors::PORTS))])
+            .map(|port| vec![Span::styled(port.clone(), fg(theme.ports))])
             .collect();
         lines.add("ports", ports, empty);
-        lines.text("user", image.shown_user(), fg(colors::USER), empty);
-        lines.text("workdir", image.shown_workdir(), fg(colors::WORKDIR), empty);
+        lines.text("user", image.shown_user(), fg(theme.user), empty);
+        lines.text("workdir", image.shown_workdir(), fg(theme.workdir), empty);
     }
     if !image.source.is_empty() {
         lines.text("source", &image.source, value, empty);
@@ -271,10 +270,10 @@ fn volume_lines(app: &App, volume: &Volume) -> Vec<Line<'static>> {
     let theme = app.theme;
     let (value, empty) = (fg(theme.text), fg(theme.dim));
     let mut lines = Lines::new(&theme);
-    lines.text("name", &volume.name, fg(colors::NAME), empty);
-    lines.text("driver", &volume.driver, fg(colors::DRIVER), empty);
+    lines.text("name", &volume.name, fg(theme.name), empty);
+    lines.text("driver", &volume.driver, fg(theme.driver), empty);
     lines.text("mount", &volume.mountpoint, value, empty);
-    lines.text("created", &volume.created, fg(colors::CREATED), empty);
+    lines.text("created", &volume.created, fg(theme.created), empty);
     let users_list = app.volume_users(volume);
     let used_by = users(app, &users_list, |container| {
         let destination = container
@@ -352,7 +351,7 @@ fn draw_graphs(buf: &mut Buffer, area: Rect, app: &App, container: &Container) {
     let now = stats.map_or_else(|| "—".to_string(), |stats| format!("{:.1}%", stats.cpu));
     let label = Line::from(vec![
         Span::styled("CPU ", fg(theme.muted)),
-        Span::styled(now, bold(theme.green)),
+        Span::styled(now, bold(theme.cpu)),
         Span::styled(format!("   peak {peak:.1}%"), fg(theme.dim)),
     ]);
     let range = (0.0, peak.max(5.0) * 1.15);
@@ -363,7 +362,7 @@ fn draw_graphs(buf: &mut Buffer, area: Rect, app: &App, container: &Container) {
         &label,
         &cpu,
         range,
-        color(theme.green),
+        color(theme.cpu),
         &theme,
     );
 
@@ -371,11 +370,8 @@ fn draw_graphs(buf: &mut Buffer, area: Rect, app: &App, container: &Container) {
     let limit = stats
         .map(|stats| format!(" / {}", compact_bytes(stats.memory_limit)))
         .unwrap_or_default();
-    let level = stats.map_or(theme.blue, |stats| {
-        match theme.level(fraction(stats.memory, stats.memory_limit)) {
-            level if level == theme.text => theme.blue,
-            level => level,
-        }
+    let level = stats.map_or(theme.memory, |stats| {
+        theme.level(fraction(stats.memory, stats.memory_limit), theme.memory)
     });
     let label = Line::from(vec![
         Span::styled("MEM ", fg(theme.muted)),
@@ -393,7 +389,7 @@ fn draw_graphs(buf: &mut Buffer, area: Rect, app: &App, container: &Container) {
         &label,
         &memory,
         (low, high),
-        color(theme.blue),
+        color(theme.memory),
         &theme,
     );
 
@@ -437,7 +433,7 @@ fn labeled_graph(
         area.width,
         height.min(area.height.saturating_sub(1)),
     );
-    graph(buf, graph_area, values, low, high, color, theme.bg_alt);
+    graph(buf, graph_area, values, low, high, color, theme.stripe);
     let used = (height + 1).min(area.height);
     Rect {
         y: area.y + used,

@@ -45,13 +45,15 @@ A shell from `e` runs on the terminal's main screen, so its session stays in the
 
 ## Settings
 
-Optional: `~/.config/box/settings.yml` (or under `$XDG_CONFIG_HOME`).
+Optional: `~/.config/box/settings.toml` (or under `$XDG_CONFIG_HOME`). Its `[theme]` sets the colors of `box list` and the dashboard, every key optional; [`src/settings/example.toml`](src/settings/example.toml) lists them with their defaults. Colors that mean something, like a container's state, stay as they are.
 
-```yaml
-accent: yellow   # yellow, red, green, blue, magenta or cyan
+```toml
+[theme]
+image = "cyan"
+bar = 254
 ```
 
-Colors are the terminal's ANSI ones, so its theme decides them. Backgrounds are grays 236–239 of the 256-color palette and assume a dark terminal.
+A color is `"default"` (the terminal's text color), an ANSI name like `"cyan"`, `"bright-red"`, `"gray"` or `"dark-gray"`, a number of the 256, or `"#rrggbb"`. ANSI names follow the terminal's theme. By default it's the text color and grays with a yellow accent, and the backgrounds are grays 236–239, for a dark terminal.
 
 ## Tests
 

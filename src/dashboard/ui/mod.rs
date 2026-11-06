@@ -14,7 +14,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use super::app::{App, Details};
-use super::theme::Theme;
+use crate::theme::Theme;
 
 const MIN_WIDTH: u16 = 30;
 const MIN_HEIGHT: u16 = 6;
@@ -98,6 +98,15 @@ pub fn bold(color: Color) -> Style {
     Style::new().fg(color).add_modifier(Modifier::BOLD)
 }
 
+/// Bold text on `color`, reversed so the text is the terminal's background, readable on any color, even
+/// the terminal's own text color
+pub fn badge(color: Color) -> Style {
+    Style::new()
+        .fg(color)
+        .bg(Color::Reset)
+        .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+}
+
 /// Writes `text` up to `end`, the column after where it's written
 fn put(buf: &mut Buffer, x: u16, y: u16, text: &str, style: Style, end: u16) -> u16 {
     if x >= end || y >= buf.area.bottom() {
@@ -176,10 +185,11 @@ fn rounded_box(
 fn dim(buf: &mut Buffer, area: Rect, theme: &Theme) {
     for position in area.intersection(buf.area).positions() {
         let cell = &mut buf[position];
+        let colored = cell.bg != Color::Reset || cell.modifier.contains(Modifier::REVERSED);
         cell.fg = theme.dim;
         cell.modifier = Modifier::empty();
-        if cell.bg != Color::Reset {
-            cell.bg = theme.bg_alt;
+        if colored {
+            cell.bg = theme.stripe;
         }
     }
 }
@@ -215,7 +225,6 @@ mod tests {
     use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
     use super::*;
-    use crate::colors;
     use crate::dashboard::app::{Action, LogLine};
     use crate::dashboard::sample;
 
@@ -261,14 +270,19 @@ mod tests {
     #[test]
     fn styles() {
         let mut app = sample::app();
+        // A count color unlike plain text, so the check below can tell them apart
+        app.theme.count = Color::Magenta;
         let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
         terminal.draw(|frame| draw(frame, &mut app)).unwrap();
         let buffer = terminal.backend().buffer();
         let theme = app.theme;
-        // The active tab, the selected row, a zebra row and the stopped container
-        assert_eq!(buffer[(2, 0)].bg, theme.accent);
-        assert_eq!(buffer[(3, 3)].bg, theme.bg_selected);
-        assert_eq!(buffer[(3, 4)].bg, theme.bg_alt);
+        // The active tab: reversed, so its text is the terminal's background on the accent
+        let tab = &buffer[(2, 0)];
+        assert_eq!((tab.fg, tab.bg), (theme.accent, Color::Reset));
+        assert!(tab.modifier.contains(Modifier::REVERSED));
+        // The selected row, a zebra row and the stopped container
+        assert_eq!(buffer[(3, 3)].bg, theme.selected);
+        assert_eq!(buffer[(3, 4)].bg, theme.stripe);
         assert!(!buffer[(3, 3)].modifier.contains(Modifier::BOLD));
         assert_eq!(buffer[(3, 7)].fg, theme.dim);
 
@@ -290,7 +304,7 @@ mod tests {
                 .unwrap();
             buffer[(x, y)].fg
         };
-        assert_eq!(count("pgdata"), colors::COUNT);
+        assert_eq!(count("pgdata"), theme.count);
         assert_eq!(count("old-data"), theme.dim);
 
         // An image docker's host can't run natively
@@ -365,7 +379,7 @@ mod tests {
 
     #[test]
     fn empty_and_filtered() {
-        let mut app = App::new(Theme::new(crate::settings::Accent::Yellow), Instant::now());
+        let mut app = App::new(Theme::default(), Instant::now());
         assert_snapshot("loading", &screen(&mut app, 80, 12));
         let mut app = sample::app();
         press(&mut app, "/nothing⏎");

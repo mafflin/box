@@ -1,0 +1,31 @@
+# box settings, read from ~/.config/box/settings.toml ($XDG_CONFIG_HOME/box/ if set); everything is optional.
+# Colors: "default" (the terminal's text color), an ANSI name like "cyan", "bright-red", "gray" or "dark-gray",
+# a number of the 256 like 239, or "#rrggbb". ANSI names follow the terminal's theme; "white" is the bright one.
+
+# [theme]
+# # Containers, as box list shows them
+# name = "default"    # also a volume's
+# image = "default"
+# user = "dark-gray"
+# status = "default"   # box list only, the dashboard colors it by state
+# ip = "dark-gray"
+# ports = "default"
+# workdir = "default"  # also where it shows among the mounts
+# mounts = "dark-gray"
+# # Images and volumes
+# id = "dark-gray"
+# size = "dark-gray"
+# driver = "dark-gray"
+# created = "dark-gray"
+# count = "default"    # how many containers use it, the dashboard dims none
+# # The dashboard's frame
+# accent = "yellow"    # the active tab, key hints, the sorted column, dialogs
+# muted = "gray"       # labels and what keys do
+# dim = "dark-gray"    # stopped rows, empty values, disabled keys
+# border = 239
+# bar = 237            # behind the header, tabs, footer and dialogs
+# stripe = 236         # behind every other row and the graphs
+# selected = 239
+# # A container's graphs
+# cpu = "green"
+# memory = "blue"      # its value turns yellow and red as memory fills

@@ -5,11 +5,10 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 
 use super::{bold, fg, fill, fit, put, rounded_box};
-use crate::colors;
 use crate::dashboard::app::{App, Pending, SortKey, View};
-use crate::dashboard::theme::Theme;
 use crate::docker::Container;
 use crate::format::{compact_bytes, short_id};
+use crate::theme::Theme;
 
 const GAP: u16 = 2;
 const LEAD: u16 = 1;
@@ -75,7 +74,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
         .collect();
     fit_widths(&mut columns, &headers, usize::from(inner.width - LEAD - 1));
 
-    fill(buf, Rect { height: 1, ..inner }, theme.text, theme.bg_bar);
+    fill(buf, Rect { height: 1, ..inner }, theme.text, theme.bar);
     let cells = headers.iter().zip(&columns).map(|(header, column)| {
         let color = if column.sort == Some(sort.key) {
             theme.accent
@@ -99,9 +98,9 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
             1,
         );
         if is_selected {
-            fill(buf, row_area, theme.text, theme.bg_selected);
+            fill(buf, row_area, theme.text, theme.selected);
         } else if position % 2 == 1 {
-            fill(buf, row_area, theme.text, theme.bg_alt);
+            fill(buf, row_area, theme.text, theme.stripe);
         }
         let cells = columns.iter().map(|column| {
             let (text, style) = column.cells[row].clone();
@@ -223,10 +222,8 @@ fn containers(app: &App, rows: &[usize]) -> (Vec<Column>, Vec<bool>) {
     let none = || ("—".to_string(), fg(theme.dim));
 
     for container in &app.containers {
-        name.cells.push((container.name.clone(), fg(colors::NAME)));
-        image
-            .cells
-            .push((container.image.clone(), fg(colors::IMAGE)));
+        name.cells.push((container.name.clone(), fg(theme.name)));
+        image.cells.push((container.image.clone(), fg(theme.image)));
         status.cells.push(status_cell(app, container));
         let usage = app.container_stats(container).map_or_else(
             || [none(), none(), none(), none()],
@@ -234,11 +231,11 @@ fn containers(app: &App, rows: &[usize]) -> (Vec<Column>, Vec<bool>) {
                 [
                     (
                         format!("{:.1}", usage.cpu),
-                        fg(theme.level(usage.cpu / 100.0)),
+                        fg(theme.level(usage.cpu / 100.0, theme.text)),
                     ),
                     (
                         compact_bytes(usage.memory),
-                        fg(theme.level(fraction(usage.memory, usage.memory_limit))),
+                        fg(theme.level(fraction(usage.memory, usage.memory_limit), theme.text)),
                     ),
                     (
                         format!(
@@ -260,7 +257,7 @@ fn containers(app: &App, rows: &[usize]) -> (Vec<Column>, Vec<bool>) {
         }
         ports
             .cells
-            .push((container.ports.join(" "), fg(colors::PORTS)));
+            .push((container.ports.join(" "), fg(theme.ports)));
     }
     let dimmed = app
         .containers
@@ -316,9 +313,9 @@ fn images(app: &App, rows: &[usize]) -> (Vec<Column>, Vec<bool>) {
     let mut created = Column::new("CREATED", Some(SortKey::Created)).right();
     let mut users = Column::new("CONTAINERS", None).right();
     for entry in &app.images {
-        image.cells.push((entry.reference(), fg(colors::IMAGE)));
+        image.cells.push((entry.reference(), fg(theme.image)));
         id.cells
-            .push((short_id(&entry.id).to_string(), fg(colors::ID)));
+            .push((short_id(&entry.id).to_string(), fg(theme.id)));
         let foreign = entry.is_foreign(&app.host);
         platform.cells.push((
             if foreign {
@@ -328,10 +325,10 @@ fn images(app: &App, rows: &[usize]) -> (Vec<Column>, Vec<bool>) {
             },
             fg(theme.yellow),
         ));
-        size.cells.push((entry.size.clone(), fg(colors::SIZE)));
+        size.cells.push((entry.size.clone(), fg(theme.size)));
         created
             .cells
-            .push((entry.created_since.clone(), fg(colors::CREATED)));
+            .push((entry.created_since.clone(), fg(theme.created)));
         users
             .cells
             .push(count_cell(&theme, app.image_users(entry).len()));
@@ -357,13 +354,11 @@ fn volumes(app: &App, rows: &[usize]) -> (Vec<Column>, Vec<bool>) {
     let mut created = Column::new("CREATED", Some(SortKey::Created)).right();
     let mut users = Column::new("CONTAINERS", None).right();
     for volume in &app.volumes {
-        name.cells.push((volume.name.clone(), fg(colors::NAME)));
-        driver
-            .cells
-            .push((volume.driver.clone(), fg(colors::DRIVER)));
+        name.cells.push((volume.name.clone(), fg(theme.name)));
+        driver.cells.push((volume.driver.clone(), fg(theme.driver)));
         created
             .cells
-            .push((volume.created.clone(), fg(colors::CREATED)));
+            .push((volume.created.clone(), fg(theme.created)));
         users
             .cells
             .push(count_cell(&theme, app.volume_users(volume).len()));
@@ -377,7 +372,7 @@ fn volumes(app: &App, rows: &[usize]) -> (Vec<Column>, Vec<bool>) {
 fn count_cell(theme: &Theme, count: usize) -> (String, Style) {
     (
         count.to_string(),
-        fg(if count == 0 { theme.dim } else { colors::COUNT }),
+        fg(if count == 0 { theme.dim } else { theme.count }),
     )
 }
 
