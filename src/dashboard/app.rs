@@ -264,8 +264,18 @@ pub enum Modal {
 #[derive(Debug, PartialEq)]
 pub enum Effect {
     Start(Task),
-    OpenLogs { session: u64, id: String },
-    CloseLogs { session: u64 },
+    OpenLogs {
+        session: u64,
+        id: String,
+    },
+    CloseLogs {
+        session: u64,
+    },
+    /// Hand the terminal to a shell in the container until it exits
+    Shell {
+        id: String,
+        name: String,
+    },
     Refresh,
     Quit,
 }
@@ -281,6 +291,11 @@ pub struct Snapshot {
 
 pub enum Action {
     Key(KeyEvent),
+    /// Docker couldn't open a shell in the container, with its message
+    ShellFailed {
+        name: String,
+        message: String,
+    },
     Resize,
     Snapshot(Result<Snapshot, String>),
     Stats(Stats),
@@ -380,6 +395,15 @@ impl App {
         match action {
             Action::Key(key) => self.key(key),
             Action::Resize => Vec::new(),
+            Action::ShellFailed { name, message } => {
+                let message = if message.contains("executable file not found") {
+                    format!("no shell in {name}")
+                } else {
+                    format!("can't open a shell in {name}: {message}")
+                };
+                self.toast(message, Tone::Bad);
+                Vec::new()
+            }
             Action::Snapshot(snapshot) => self.snapshot(snapshot),
             Action::Stats(stats) => {
                 self.add_stats(stats);
@@ -581,7 +605,8 @@ impl App {
 
     /// Only for running containers, a stopped one keeps its last
     pub fn container_stats(&self, container: &Container) -> Option<&Stats> {
-        (container.state == "running")
+        container
+            .is_running()
             .then(|| self.stats.get(&container.id))
             .flatten()
     }
@@ -776,6 +801,7 @@ impl App {
             KeyCode::Char('r') => self.restart(),
             KeyCode::Char('d') | KeyCode::Delete => self.remove(),
             KeyCode::Char('l') | KeyCode::Enter => return self.open_logs(),
+            KeyCode::Char('e') => return self.open_shell(),
             KeyCode::Char(c) => {
                 if let Some(key) = SortKey::from_key(c) {
                     self.sort_by(key);
@@ -963,6 +989,23 @@ impl App {
             self.pending.insert(id.clone(), (*pending, false));
         }
         vec![Effect::Start(task)]
+    }
+
+    fn open_shell(&mut self) -> Vec<Effect> {
+        let Some(container) = self.selected_container().cloned() else {
+            return Vec::new();
+        };
+        if self.pending.contains_key(&container.id) {
+            return Vec::new();
+        }
+        if !container.is_running() {
+            self.toast(format!("{} is not running", container.name), Tone::Warn);
+            return Vec::new();
+        }
+        vec![Effect::Shell {
+            id: container.id,
+            name: container.name,
+        }]
     }
 
     fn open_logs(&mut self) -> Vec<Effect> {
@@ -1208,6 +1251,41 @@ mod tests {
         assert_eq!(app.rows(View::Containers).len(), 4);
         press(&mut app, "⇥");
         assert_eq!(app.view, View::Images);
+    }
+
+    #[test]
+    fn opens_a_shell_in_running_containers() {
+        let mut app = sample::app();
+        assert_eq!(selected_name(&mut app), "api");
+        let shell = Effect::Shell {
+            id: "api-id".into(),
+            name: "api".into(),
+        };
+        assert_eq!(press(&mut app, "e"), [shell]);
+
+        let failed = |message: &str| Action::ShellFailed {
+            name: "api".into(),
+            message: message.into(),
+        };
+        let missing = r#"OCI runtime exec failed: exec: "sh": executable file not found in $PATH"#;
+        assert_eq!(app.update(failed(missing), Instant::now()), []);
+        assert_eq!(app.toast.as_ref().unwrap().text, "no shell in api");
+        let stopped = "Error response from daemon: container api-id is not running";
+        app.update(failed(stopped), Instant::now());
+        assert_eq!(
+            app.toast.as_ref().unwrap().text,
+            format!("can't open a shell in api: {stopped}")
+        );
+
+        // Not while it's being stopped
+        press(&mut app, "sy");
+        assert_eq!(press(&mut app, "e"), []);
+
+        press(&mut app, "G");
+        assert_eq!(selected_name(&mut app), "worker");
+        assert_eq!(press(&mut app, "e"), []);
+        assert_eq!(app.toast.as_ref().unwrap().text, "worker is not running");
+        assert_eq!(press(&mut app, "2e"), []);
     }
 
     #[test]

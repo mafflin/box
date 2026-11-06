@@ -25,4 +25,4 @@ expression: screen
 │ workdir  /app                            █████▆▇██████████▇▆███████████▇▇███ │
 │ … 3 more                                 NET ↓ 75M  ↑ 10M   PIDS 12          │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- ↑↓ move  tab view  s stop  r restart  d remove  l logs  / filter
+ ↑↓ move  tab view  s stop  r restart  d remove  l logs  e shell  / filter

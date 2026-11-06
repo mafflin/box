@@ -21,4 +21,4 @@ expression: screen
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- ↑↓ move  tab view  s stop  r restart  d remove  l logs  / filter
+ ↑↓ move  tab view  s stop  r restart  d remove  l logs  e shell  / filter

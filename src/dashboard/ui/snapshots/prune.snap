@@ -31,4 +31,4 @@ expression: screen
 │ mounts   /home/me/work/api:/app                    █████████████████████████████████████████████ │
 │          bundle:/usr/local/bundle                  NET ↓ 75M  ↑ 10M   PIDS 12                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
- ↑↓ move  tab view  s stop  r restart  d remove  l logs  / filter  a running only  i details
+ ↑↓ move  tab view  s stop  r restart  d remove  l logs  e shell  / filter  a running only

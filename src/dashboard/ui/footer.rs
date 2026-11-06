@@ -113,6 +113,7 @@ fn hints(app: &mut App) -> Vec<(&'static str, &'static str, bool)> {
         "stop"
     };
     let logs = !selected.is_some_and(crate::docker::Container::is_interactive);
+    let shell = selected.is_some_and(crate::docker::Container::is_running);
     vec![
         ("↑↓", "move", true),
         ("tab", "view", true),
@@ -120,6 +121,7 @@ fn hints(app: &mut App) -> Vec<(&'static str, &'static str, bool)> {
         ("r", "restart", true),
         ("d", "remove", true),
         ("l", "logs", logs),
+        ("e", "shell", shell),
         ("/", "filter", true),
         ("a", show, true),
         ("i", "details", true),

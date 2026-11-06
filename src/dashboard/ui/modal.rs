@@ -33,6 +33,7 @@ const HELP: [(&str, &[(&str, &str)]); 3] = [
             ("r", "restart"),
             ("d", "remove"),
             ("l enter", "logs (not for -it)"),
+            ("e", "shell (bash or sh)"),
             ("a", "show stopped"),
         ],
     ),

@@ -7,6 +7,10 @@ mod sample;
 mod theme;
 mod ui;
 
+use std::io::{self, stdout};
+use std::process::{Child, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -17,9 +21,10 @@ use ratatui::crossterm::event::{
     MouseEventKind,
 };
 use ratatui::crossterm::execute;
+use ratatui::crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 
 use crate::settings::Settings;
-use crate::{Result, docker};
+use crate::{Result, docker, format};
 use app::{Action, App, Effect};
 use collector::Collector;
 use theme::Theme;
@@ -28,6 +33,10 @@ use theme::Theme;
 const TICK: Duration = Duration::from_millis(250);
 /// Updates handled before drawing again, so a burst of log lines draws once
 const BATCH: usize = 1000;
+/// How long the input thread waits for an event before checking whether it's paused
+const POLL: Duration = Duration::from_millis(50);
+/// What `e` runs in the container: bash, else sh
+const SHELL: &str = "command -v bash >/dev/null && exec bash || exec sh";
 
 pub fn run() -> Result<()> {
     // Before taking over the screen, so the errors show
@@ -37,7 +46,7 @@ pub fn run() -> Result<()> {
     let theme = Theme::new(settings.accent);
     let (actions, updates) = mpsc::channel();
     let mut collector = Collector::start(actions.clone());
-    read_input(actions);
+    let input = read_input(actions);
 
     let mut terminal = ratatui::init();
     capture_mouse();
@@ -48,6 +57,7 @@ pub fn run() -> Result<()> {
                 &mut terminal,
                 &updates,
                 &mut collector,
+                &input,
                 App::new(theme, Instant::now()),
             )
         });
@@ -61,6 +71,7 @@ fn event_loop(
     terminal: &mut DefaultTerminal,
     updates: &Receiver<Action>,
     collector: &mut Collector,
+    input: &Input,
     mut app: App,
 ) -> Result<()> {
     let mut dirty = true;
@@ -90,12 +101,20 @@ fn event_loop(
                     Effect::Start(task) => collector.start_task(task),
                     Effect::OpenLogs { session, id } => collector.open_logs(session, &id),
                     Effect::CloseLogs { session } => collector.close_logs(session),
+                    Effect::Shell { id, name } => {
+                        if let Some(message) = open_shell(terminal, input, &id)? {
+                            app.update(Action::ShellFailed { name, message }, Instant::now());
+                        }
+                        // What was done in the shell, like killing its container
+                        collector.refresh();
+                    }
                     Effect::Refresh => collector.refresh(),
                     Effect::Quit => return Ok(()),
                 }
             }
         }
-        dirty |= app.expire(now);
+        // A shell may have taken minutes
+        dirty |= app.expire(Instant::now());
     }
 }
 
@@ -109,18 +128,110 @@ fn capture_mouse() {
     }));
 }
 
+/// Hands the terminal to `docker exec -it` until the shell exits, then takes it back; docker's error, if it
+/// couldn't open one. Raw mode stays on, so Ctrl-C goes to the shell and never to box, and the session stays
+/// on the main screen, in the scrollback
+fn open_shell(terminal: &mut DefaultTerminal, input: &Input, id: &str) -> Result<Option<String>> {
+    input.pause();
+    terminal.show_cursor()?;
+    execute!(stdout(), DisableMouseCapture, LeaveAlternateScreen)?;
+    let ran = docker::command(&["exec", "-it", id, "sh", "-c", SHELL])
+        .stderr(Stdio::piped())
+        .spawn()
+        .and_then(Child::wait_with_output);
+    execute!(stdout(), EnterAlternateScreen, EnableMouseCapture)?;
+    terminal.clear()?;
+    input.resume();
+    Ok(match ran {
+        Ok(output) if output.status.success() => None,
+        Ok(output) => docker_error(&output.stderr),
+        Err(e) => Some(format!("can't run docker: {e}")),
+    })
+}
+
+/// The first line docker wrote to stderr. With `-t` the shell's output goes through the terminal, so only
+/// docker's own errors come here, and nothing when the shell exits with its last command's status
+fn docker_error(stderr: &[u8]) -> Option<String> {
+    String::from_utf8_lossy(stderr)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(|line| format::sanitize(line.as_bytes(), 200))
+}
+
+/// The input thread, which can stop reading the keyboard while a shell has it
+struct Input {
+    paused: Arc<AtomicBool>,
+    stopped: Receiver<()>,
+}
+
+impl Input {
+    /// Returns once the thread stopped reading, or after a second if it's gone
+    fn pause(&self) {
+        while self.stopped.try_recv().is_ok() {}
+        self.paused.store(true, Ordering::SeqCst);
+        let _ = self.stopped.recv_timeout(Duration::from_secs(1));
+    }
+
+    fn resume(&self) {
+        self.paused.store(false, Ordering::SeqCst);
+    }
+}
+
 /// Keys, the wheel and resizes, from a thread that waits for them
-fn read_input(actions: Sender<Action>) {
+fn read_input(actions: Sender<Action>) -> Input {
+    let paused = Arc::new(AtomicBool::new(false));
+    let (stopped, acknowledged) = mpsc::channel();
+    let flag = Arc::clone(&paused);
     thread::spawn(move || {
-        loop {
-            let Ok(event) = event::read() else { return };
-            if let Some(action) = action(&event)
-                && actions.send(action).is_err()
-            {
-                return;
-            }
-        }
+        forward(
+            |timeout| {
+                if event::poll(timeout)? {
+                    event::read().map(Some)
+                } else {
+                    Ok(None)
+                }
+            },
+            &flag,
+            &stopped,
+            &actions,
+        );
     });
+    Input {
+        paused,
+        stopped: acknowledged,
+    }
+}
+
+/// Sends what `next` reads as actions until it fails or the dashboard's gone. While paused it doesn't read,
+/// so the keys go to the shell, and it says once per pause that it stopped
+fn forward(
+    mut next: impl FnMut(Duration) -> io::Result<Option<Event>>,
+    paused: &AtomicBool,
+    stopped: &Sender<()>,
+    actions: &Sender<Action>,
+) {
+    let mut said = false;
+    loop {
+        if paused.load(Ordering::SeqCst) {
+            if !said {
+                said = stopped.send(()).is_ok();
+            }
+            thread::sleep(POLL);
+            continue;
+        }
+        said = false;
+        let event = match next(POLL) {
+            Ok(Some(event)) => event,
+            Ok(None) => continue,
+            Err(_) => return,
+        };
+        if let Some(action) = action(&event)
+            && actions.send(action).is_err()
+        {
+            return;
+        }
+    }
 }
 
 /// The wheel moves as ↑↓ do
@@ -171,6 +282,71 @@ mod tests {
         ] {
             assert!(action(&mouse(other)).is_none());
         }
+    }
+
+    #[test]
+    fn stops_reading_while_paused() {
+        let paused = Arc::new(AtomicBool::new(true));
+        let finished = Arc::new(AtomicBool::new(false));
+        let (stopped, acknowledged) = mpsc::channel();
+        let (actions, received) = mpsc::channel();
+        let (reads, read) = mpsc::channel();
+        let (flag, done) = (Arc::clone(&paused), Arc::clone(&finished));
+        let reader = thread::spawn(move || {
+            let mut keys = "ab".chars();
+            forward(
+                |timeout| {
+                    if done.load(Ordering::SeqCst) {
+                        return Err(io::Error::other("gone"));
+                    }
+                    let _ = reads.send(());
+                    let key = keys.next();
+                    if key.is_none() {
+                        thread::sleep(timeout);
+                    }
+                    Ok(key.map(|c| Event::Key(KeyEvent::from(KeyCode::Char(c)))))
+                },
+                &flag,
+                &stopped,
+                &actions,
+            );
+        });
+
+        // Paused from the start: it says so once and reads nothing
+        let wait = Duration::from_secs(1);
+        acknowledged.recv_timeout(wait).unwrap();
+        thread::sleep(POLL * 3);
+        assert!(read.try_recv().is_err());
+        assert!(acknowledged.try_recv().is_err());
+
+        paused.store(false, Ordering::SeqCst);
+        for expected in ['a', 'b'] {
+            let Action::Key(key) = received.recv_timeout(wait).unwrap() else {
+                panic!("not a key");
+            };
+            assert_eq!(key.code, KeyCode::Char(expected));
+        }
+        paused.store(true, Ordering::SeqCst);
+        acknowledged.recv_timeout(wait).unwrap();
+
+        finished.store(true, Ordering::SeqCst);
+        paused.store(false, Ordering::SeqCst);
+        reader.join().unwrap();
+    }
+
+    #[test]
+    fn docker_errors() {
+        let error = b"\nError response from daemon: container abc is not running\nSee 'docker exec --help'.\n";
+        assert_eq!(
+            docker_error(error).as_deref(),
+            Some("Error response from daemon: container abc is not running")
+        );
+        assert_eq!(
+            docker_error(b"\x1b]0;title\x07oops\n").as_deref(),
+            Some("oops")
+        );
+        assert_eq!(docker_error(b""), None);
+        assert_eq!(docker_error(b"\n  \n"), None);
     }
 
     #[test]

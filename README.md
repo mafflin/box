@@ -33,10 +33,13 @@ box stop                                  # all running containers
 | `i` | details: below, beside, off |
 | `s` `r` `d` | start/stop, restart, remove (confirm with `y`) |
 | `l` `enter` | follow logs (`space` pauses) |
+| `e` | shell in a running container: bash, else sh |
 | `p` | prune stopped containers and dangling volumes and images |
 | `?` `q` | help, quit |
 
 Containers started with `-t` or `-i` have no logs view, since their output is a terminal session. Log lines are stripped of escape sequences and control characters, so a container can't change your terminal.
+
+A shell from `e` runs on the terminal's main screen, so its session stays in the scrollback after you quit box.
 
 ## Settings
 

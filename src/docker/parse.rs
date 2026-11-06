@@ -48,6 +48,11 @@ pub struct Container {
 }
 
 impl Container {
+    /// Running, not paused or restarting: what a shell can open in
+    pub fn is_running(&self) -> bool {
+        self.state == "running"
+    }
+
     /// Running, paused or restarting: what stop stops
     pub fn is_up(&self) -> bool {
         matches!(self.state.as_str(), "running" | "paused" | "restarting")

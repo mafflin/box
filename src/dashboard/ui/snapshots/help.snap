@@ -14,11 +14,11 @@ expression: screen
 │           │  g G         top / bottom               r           restart              │           │
 │           │  tab 1 2 3   switch view                d           remove               │           │
 │           │  /           filter                     l enter     logs (not for -it)   │           │
-│           │  esc         clear filter               a           show stopped         │           │
-│           │  P M N       sort cpu / mem / name                                       │           │
-│           │  S T         sort size / created        Images · Volumes                 │           │
-│           │  i           details bottom/right/off   d           remove if unused     │           │
-│           │  p           prune                                                       │           │
+│           │  esc         clear filter               e           shell (bash or sh)   │           │
+│           │  P M N       sort cpu / mem / name      a           show stopped         │           │
+│           │  S T         sort size / created                                         │           │
+│           │  i           details bottom/right/off   Images · Volumes                 │           │
+│           │  p           prune                      d           remove if unused     │           │
 ╰───────────│  q           quit                                                        │───── 1/5 ─╯
 ╭─ api ─────│                                                                          │───────────╮
 │ image    a│                                                                          │           │
@@ -31,4 +31,4 @@ expression: screen
 │ mounts   /home/me/work/api:/app                    █████████████████████████████████████████████ │
 │          bundle:/usr/local/bundle                  NET ↓ 75M  ↑ 10M   PIDS 12                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
- ↑↓ move  tab view  s stop  r restart  d remove  l logs  / filter  a running only  i details
+ ↑↓ move  tab view  s stop  r restart  d remove  l logs  e shell  / filter  a running only
