@@ -23,6 +23,6 @@ expression: screen
 │          172.19.0.4                      MEM 649M / 2.0G                     │
 │ user     app                             ▄▄▃▁   ▁▂▃▄▅▅▄▃▂▁   ▁▃▄▄▅▄▄▃▂    ▂▅ │
 │ workdir  /app                            █████▆▇██████████▇▆███████████▇▇███ │
-│ … 3 more                                 NET ↓ 75M  ↑ 10M   PIDS 12          │
+│ … 4 more                                 NET ↓ 75M  ↑ 10M   PIDS 12          │
 ╰──────────────────────────────────────────────────────────────────────────────╯
  s stop  r restart  d remove  l logs  e shell  │  / filter       ? help  q quit

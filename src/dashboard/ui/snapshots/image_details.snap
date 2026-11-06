@@ -4,7 +4,7 @@ expression: screen
 ---
   Containers 5   Images 6   Volumes 4                                                                                           sort name ▲
 ╭─ Images ──────────────────────────────────────────────────────────────────────────────────╮╭─ acme/api:dev ──────────────────────────────╮
-│ IMAGE ▲            ID            PLATFORM       SIZE      CREATED  CONTAINERS             ││ id       sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaa │
+│ IMAGE ▲            ID            PLATFORM       SIZE      CREATED  CONTAINERS             ││ id       sha256:aaaaaaaaaaaaaaaaaaaaaaaaaa… │
 │ <none>             0123456789ab                412MB   2 days ago           0             ││ platform linux/arm64                        │
 │ acme/api:dev       aaaaaaaaaaaa               1.21GB  3 hours ago           2             ││ tags     acme/api:dev                       │
 │ acme/api:latest    aaaaaaaaaaaa               1.21GB  3 hours ago           2             ││          acme/api:latest                    │
@@ -12,7 +12,7 @@ expression: screen
 │ postgres:16        bbbbbbbbbbbb  linux/amd64   438MB  2 weeks ago           1             ││ created  3 hours ago                        │
 │ ruby:3.3-slim      dddddddddddd                216MB  3 weeks ago           1             ││ used by  api  Up 40 minutes (healthy)       │
 │                                                                                           ││          worker  Exited (0) 3 hours ago     │
-│                                                                                           ││ command  /app/bin/docker-entrypoint ./bin/r │
+│                                                                                           ││ command  /app/bin/docker-entrypoint ./bin/… │
 │                                                                                           ││ ports    3000/tcp                           │
 │                                                                                           ││ user     app                                │
 │                                                                                           ││ workdir  /app                               │

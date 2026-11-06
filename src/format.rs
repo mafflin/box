@@ -12,6 +12,8 @@ const ID_PREFIX: &str = "sha256:";
 const READ_ONLY_SUFFIX: &str = ":ro";
 const HOME_SHORTCUT: &str = "~";
 const DATE_FORMAT: &str = "%Y-%m-%d %H:%M";
+/// A mount's source isn't shortened to less, the line is cut instead
+const MIN_SOURCE: usize = 8;
 
 /// A text with a part to stand out, empty when nothing does
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -39,11 +41,7 @@ impl Highlighted {
 
 /// `source:destination[:ro]`, with the destination highlighted when it's the working directory
 pub fn mount(mount: &Mount, workdir: &str) -> Highlighted {
-    let mut source = mount.name.clone().unwrap_or_else(|| mount.source.clone());
-    if source.is_empty() {
-        source.clone_from(&mount.kind);
-    }
-    let source = shorten_home(short_volume(&source));
+    let source = mount_source(mount);
     let read_only = if mount.rw { "" } else { READ_ONLY_SUFFIX };
     if mount.destination != workdir {
         return Highlighted::plain(format!("{source}:{}{read_only}", mount.destination));
@@ -53,6 +51,43 @@ pub fn mount(mount: &Mount, workdir: &str) -> Highlighted {
         highlight: mount.destination.clone(),
         suffix: read_only.to_string(),
     }
+}
+
+/// `mount` in at most `width` columns, its source shortened in the middle so the destination and `:ro` stay
+/// whole; as it is when even that doesn't fit
+pub fn fit_mount(mount: &Mount, workdir: &str, width: usize) -> Highlighted {
+    let mut shown = self::mount(mount, workdir);
+    let source = mount_source(mount);
+    let rest = shown.len() - source.chars().count();
+    if shown.len() > width
+        && let Some(room) = width.checked_sub(rest).filter(|&room| room >= MIN_SOURCE)
+    {
+        shown.prefix = shorten_middle(&source, room) + &shown.prefix[source.len()..];
+    }
+    shown
+}
+
+/// A volume's short name, a path with `~` for home, or the kind, like `tmpfs`
+fn mount_source(mount: &Mount) -> String {
+    let source = mount.name.as_deref().unwrap_or(&mount.source);
+    let source = if source.is_empty() {
+        &mount.kind
+    } else {
+        source
+    };
+    shorten_home(short_volume(source))
+}
+
+/// `text` in at most `width` characters, with `…` for what's cut from the middle
+pub fn shorten_middle(text: &str, width: usize) -> String {
+    let length = text.chars().count();
+    if length <= width {
+        return text.to_string();
+    }
+    let kept = width.saturating_sub(1);
+    let head: String = text.chars().take(kept - kept / 2).collect();
+    let tail: String = text.chars().skip(length - kept / 2).collect();
+    format!("{head}…{tail}")
 }
 
 /// Docker names anonymous volumes with 64 hex digits
@@ -368,6 +403,43 @@ mod tests {
         );
         assert_eq!(command(&args(&["/bin/sh", "-c"])), "/bin/sh -c");
         assert_eq!(command(&[]), "");
+    }
+
+    #[test]
+    fn fits_mounts() {
+        let mount = Mount {
+            kind: "bind".into(),
+            source: "/srv/state/sndbx/squid.conf".into(),
+            destination: "/etc/squid/squid.conf".into(),
+            ..Mount::default()
+        };
+        let text = |width| {
+            let shown = fit_mount(&mount, "/", width);
+            shown.prefix + &shown.highlight + &shown.suffix
+        };
+        assert_eq!(
+            text(100),
+            "/srv/state/sndbx/squid.conf:/etc/squid/squid.conf:ro"
+        );
+        // The source gives way, the destination and :ro stay
+        assert_eq!(text(40), "/srv/st…id.conf:/etc/squid/squid.conf:ro");
+        // Too narrow for even that: as it is, for the line to be cut
+        assert_eq!(
+            text(30),
+            "/srv/state/sndbx/squid.conf:/etc/squid/squid.conf:ro"
+        );
+        // The working directory stays highlighted
+        let shown = fit_mount(&mount, "/etc/squid/squid.conf", 40);
+        assert_eq!(shown.highlight, "/etc/squid/squid.conf");
+        assert_eq!(shown.prefix.chars().count(), 16);
+    }
+
+    #[test]
+    fn shortens_in_the_middle() {
+        assert_eq!(shorten_middle("abcdefghij", 10), "abcdefghij");
+        assert_eq!(shorten_middle("abcdefghij", 7), "abc…hij");
+        assert_eq!(shorten_middle("abcdefghij", 6), "abc…ij");
+        assert_eq!(shorten_middle("abcdefghij", 1), "…");
     }
 
     #[test]

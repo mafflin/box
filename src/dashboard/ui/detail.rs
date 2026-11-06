@@ -13,6 +13,10 @@ use crate::format::{self, compact_bytes};
 use crate::theme::Theme;
 
 const LABEL_WIDTH: usize = 9;
+/// What the graphs keep beside a container's details, for their labels
+const MIN_GRAPHS_WIDTH: u16 = 30;
+/// Between the details and the graphs
+const GRAPHS_GAP: u16 = 3;
 const EIGHTHS: [&str; 9] = [" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 
 pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App, bottom: bool) {
@@ -48,9 +52,23 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App, bottom: bool) {
     match app.view {
         View::Containers => {
             let container = &app.containers[row];
-            let lines = container_lines(app, container);
             if bottom {
-                let left = (inner.width / 2).min(64);
+                // Half, wider when a shown line needs it and the graphs keep enough
+                let longest = container_lines(app, container, usize::MAX)
+                    .iter()
+                    .take(usize::from(inner.height))
+                    .map(Line::width)
+                    .max()
+                    .unwrap_or(0);
+                let half = (inner.width / 2).min(64);
+                let widest = inner
+                    .width
+                    .saturating_sub(MIN_GRAPHS_WIDTH + GRAPHS_GAP)
+                    .max(half);
+                let left = u16::try_from(longest)
+                    .unwrap_or(u16::MAX)
+                    .clamp(half, widest);
+                let lines = container_lines(app, container, usize::from(left));
                 draw_lines(
                     buf,
                     Rect {
@@ -61,12 +79,13 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App, bottom: bool) {
                     &theme,
                 );
                 let graphs = Rect {
-                    x: inner.x + left + 3,
-                    width: inner.width.saturating_sub(left + 3),
+                    x: inner.x + left + GRAPHS_GAP,
+                    width: inner.width.saturating_sub(left + GRAPHS_GAP),
                     ..inner
                 };
                 draw_graphs(buf, graphs, app, container);
             } else {
+                let lines = container_lines(app, container, usize::from(inner.width));
                 let lines_height = u16::try_from(lines.len()).unwrap_or(u16::MAX);
                 let mut graphs = inner.height.saturating_sub(lines_height + 1).min(11);
                 if graphs < 5 {
@@ -134,7 +153,8 @@ impl Lines {
     }
 }
 
-fn container_lines(app: &App, container: &Container) -> Vec<Line<'static>> {
+/// Mounts fit in `width`
+fn container_lines(app: &App, container: &Container, width: usize) -> Vec<Line<'static>> {
     let theme = app.theme;
     let value = fg(theme.text);
     let empty = fg(theme.dim);
@@ -165,7 +185,8 @@ fn container_lines(app: &App, container: &Container) -> Vec<Line<'static>> {
         .mounts
         .iter()
         .map(|mount| {
-            let mount = format::mount(mount, &container.workdir);
+            let room = width.saturating_sub(LABEL_WIDTH);
+            let mount = format::fit_mount(mount, &container.workdir, room);
             let text = mount.prefix + &mount.highlight + &mount.suffix;
             vec![Span::styled(text, value)]
         })
@@ -300,7 +321,7 @@ fn prune_hint(theme: &Theme) -> Line<'static> {
     ])
 }
 
-/// As many as fit, the last saying how many more there are
+/// As many as fit, the last saying how many more there are, each ending in `…` where it's cut
 fn draw_lines(buf: &mut Buffer, area: Rect, lines: &[Line], theme: &Theme) {
     let height = usize::from(area.height);
     for (i, line) in lines.iter().take(height).enumerate() {
@@ -316,8 +337,30 @@ fn draw_lines(buf: &mut Buffer, area: Rect, lines: &[Line], theme: &Theme) {
             );
             break;
         }
-        put_line(buf, area.x, y, line, area.right());
+        let line = cut(line, usize::from(area.width));
+        put_line(buf, area.x, y, &line, area.right());
     }
+}
+
+/// `line` in `width` columns, with `…` for what doesn't fit
+fn cut<'a>(line: &Line<'a>, width: usize) -> Line<'a> {
+    if line.width() <= width {
+        return line.clone();
+    }
+    let mut room = width.saturating_sub(1);
+    let mut spans = Vec::new();
+    let mut style = line.style;
+    for span in &line.spans {
+        if room == 0 {
+            break;
+        }
+        let kept: String = span.content.chars().take(room).collect();
+        room -= kept.chars().count();
+        style = span.style;
+        spans.push(Span::styled(kept, span.style));
+    }
+    spans.push(Span::styled("…", style));
+    Line::from(spans)
 }
 
 fn draw_graphs(buf: &mut Buffer, area: Rect, app: &App, container: &Container) {
@@ -479,5 +522,19 @@ fn graph(
                 .set_symbol(symbol)
                 .set_style(Style::new().fg(color));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cuts_lines_with_an_ellipsis() {
+        let line = Line::from(vec![Span::raw("image    "), Span::raw("acme/api:dev")]);
+        assert_eq!(cut(&line, 21).to_string(), "image    acme/api:dev");
+        assert_eq!(cut(&line, 14).to_string(), "image    acme…");
+        assert_eq!(cut(&line, 9).to_string(), "image   …");
+        assert_eq!(cut(&line, 1).to_string(), "…");
     }
 }

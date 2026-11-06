@@ -56,6 +56,12 @@ fn containers() -> Vec<Container> {
         ips: vec!["172.18.0.3".into(), "172.19.0.4".into()],
         ports: vec!["3000->3000/tcp".into()],
         mounts: vec![
+            // Longer than the details' half, for how they make room or shorten it
+            bind(
+                "/home/me/.local/state/acme/api/proxy.conf",
+                "/etc/acme/proxy/proxy.conf",
+                false,
+            ),
             bind("/home/me/work/api", "/app", true),
             volume_mount("bundle", "/usr/local/bundle"),
         ],

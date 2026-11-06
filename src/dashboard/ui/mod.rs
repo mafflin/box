@@ -263,6 +263,8 @@ mod tests {
         let mut app = sample::app();
         assert_snapshot("containers_140x40", &screen(&mut app, 140, 40));
         assert_snapshot("containers_80x24", &screen(&mut app, 80, 24));
+        // Too narrow for the long mount beside the graphs: its source is shortened
+        assert_snapshot("containers_100x40", &screen(&mut app, 100, 40));
         press(&mut app, "ji");
         assert_snapshot("containers_right_details", &screen(&mut app, 140, 30));
     }

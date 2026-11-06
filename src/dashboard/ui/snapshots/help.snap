@@ -21,14 +21,14 @@ expression: screen
 │           │  i           details bottom/right/off   d           remove if unused     │           │
 ╰───────────│  p           prune                                                       │───── 1/5 ─╯
 ╭─ api ─────│  q           quit                                                        │───────────╮
-│ image    a│                                                                          │           │
+│ image    a│                                                                          │6%         │
 │ status   U│                                                                          │▄▃▁        │
 │ ip       1│                                                                          │███▅▂  ▂▆▄ │
 │          1│  any key closes                                                          │█████▅▆███ │
 │ user     a╰──────────────────────────────────────────────────────────────────────────╯           │
-│ workdir  /app                                             ▂▃▃▃▂       ▁▂▃▃▂▁       ▂▃▃▃▂       ▃ │
-│ ports    3000->3000/tcp                            ▇▅▃▂▄▆███████▆▄▁▃▅▇██████▇▅▃▁▄▆███████▆▄▂▂▅▇█ │
-│ mounts   /home/me/work/api:/app                    █████████████████████████████████████████████ │
-│          bundle:/usr/local/bundle                  NET ↓ 75M  ↑ 10M   PIDS 12                    │
+│ workdir  /app                                                         ▁▂▃▃▂▁       ▂▃▃▃▂       ▃ │
+│ ports    3000->3000/tcp                                           ▁▃▅▇██████▇▅▃▁▄▆███████▆▄▂▂▅▇█ │
+│ mounts   /home/me/.lo…/proxy.conf:/etc/acme/proxy/proxy.conf:ro   ██████████████████████████████ │
+│ … 2 more                                                          NET ↓ 75M  ↑ 10M   PIDS 12     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
  s stop  r restart  d remove  l logs  e shell  │  / filter  a running  p prune       ? help  q quit
