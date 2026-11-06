@@ -42,7 +42,7 @@ const HELP: [(&str, &[(&str, &str)]); 3] = [
 ];
 
 /// In `PruneTarget::ORDER`
-const PRUNE_LABELS: [&str; 3] = ["stopped containers", "dangling volumes", "dangling images"];
+const PRUNE_LABELS: [&str; 3] = ["stopped containers", "unused volumes", "dangling images"];
 const PRUNE_ORDER: &str = "runs in order: containers → volumes → images";
 
 pub fn draw(buf: &mut Buffer, area: Rect, app: &App) {

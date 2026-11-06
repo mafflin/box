@@ -1,6 +1,6 @@
 [package]
 name = "box"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 description = "Lists, prunes and stops docker containers, images and volumes, with a top-like dashboard"
 license = "MIT"

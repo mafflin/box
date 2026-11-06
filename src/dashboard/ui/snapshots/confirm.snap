@@ -16,7 +16,7 @@ expression: screen
 │                           ╭─ Stop ───────────────────────────────────╮                           │
 │                           │                                          │                           │
 │                           │  Stop container api?                     │                           │
-│                           │  docker stop api                         │                           │
+│                           │  docker stop api-id                      │                           │
 │                           │                                          │                           │
 │                           │   y  confirm     n  cancel               │                           │
 ╰───────────────────────────╰──────────────────────────────────────────╯───────────────────── 1/5 ─╯

@@ -14,7 +14,7 @@ expression: screen
 │                     ╭─ Prune ──────────────────────────────────────────────╮                     │
 │                     │                                                      │                     │
 │                     │ › [x] stopped containers     1                       │                     │
-│                     │   [x] dangling volumes       1                       │                     │
+│                     │   [x] unused volumes         1                       │                     │
 │                     │   [x] dangling images        1  412MB                │                     │
 │                     │                                                      │                     │
 │                     │  runs in order: containers → volumes → images        │                     │

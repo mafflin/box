@@ -254,7 +254,7 @@ pub enum Task {
 pub struct Confirm {
     pub title: String,
     pub question: String,
-    /// The docker command it runs
+    /// The docker command it runs, a container by its short ID
     pub command: String,
     pub danger: bool,
     task: Task,
@@ -651,7 +651,7 @@ impl App {
             .collect()
     }
 
-    /// Stopped containers, dangling volumes and dangling images no container uses, as prune would find them
+    /// Stopped containers, unused volumes and dangling images no container uses, as prune would find them
     pub fn prunable(&self) -> [(usize, u64); 3] {
         let containers = self
             .containers
@@ -874,7 +874,7 @@ impl App {
                 format!("Stop container {name}?"),
                 false,
                 run(
-                    &["stop", name],
+                    &["stop", &container.id],
                     Some((&container.id, Pending::Stopping)),
                     format!("stopped {name}"),
                 ),
@@ -882,7 +882,7 @@ impl App {
             return Vec::new();
         }
         self.start(run(
-            &["start", name],
+            &["start", &container.id],
             Some((&container.id, Pending::Starting)),
             format!("started {name}"),
         ))
@@ -901,7 +901,7 @@ impl App {
             format!("Restart container {name}?"),
             false,
             run(
-                &["restart", name],
+                &["restart", &container.id],
                 Some((&container.id, Pending::Restarting)),
                 format!("restarted {name}"),
             ),
@@ -926,7 +926,7 @@ impl App {
                     ("Remove", &["rm", "-v"])
                 };
                 let mut args = args.to_vec();
-                args.push(name);
+                args.push(&container.id);
                 self.confirm(
                     title,
                     format!("{title} container {name}?"),
@@ -990,13 +990,24 @@ impl App {
     }
 
     fn confirm(&mut self, title: &str, question: String, danger: bool, task: Task) {
-        let Task::Run { args, .. } = &task else {
+        let Task::Run {
+            args, container, ..
+        } = &task
+        else {
             return;
         };
+        // A container by its short ID, as the full one doesn't fit
+        let shown: Vec<&str> = args
+            .iter()
+            .map(|arg| match container {
+                Some((id, _)) if arg == id => format::short_id(id),
+                _ => arg,
+            })
+            .collect();
         self.modal = Some(Modal::Confirm(Confirm {
             title: title.to_string(),
             question,
-            command: format!("docker {}", args.join(" ")),
+            command: format!("docker {}", shown.join(" ")),
             danger,
             task,
         }));
@@ -1349,12 +1360,14 @@ mod tests {
     fn stops_after_confirming() {
         let mut app = sample::app();
         assert_eq!(press(&mut app, "s"), []);
-        assert!(matches!(app.modal, Some(Modal::Confirm(ref c)) if c.command == "docker stop api"));
+        assert!(
+            matches!(app.modal, Some(Modal::Confirm(ref c)) if c.command == "docker stop api-id")
+        );
         let effects = press(&mut app, "y");
         let [Effect::Start(Task::Run { args, .. })] = &effects[..] else {
             panic!("{effects:?}");
         };
-        assert_eq!(args, &["stop", "api"]);
+        assert_eq!(args, &["stop", "api-id"]);
         let api = app.containers[0].clone();
         assert_eq!(app.pending(&api), Some(Pending::Stopping));
         // Pressing again does nothing until docker answers
@@ -1377,6 +1390,22 @@ mod tests {
         assert_eq!(app.pending(&api), Some(Pending::Stopping));
         app.update(Action::Snapshot(Ok(sample::snapshot())), Instant::now());
         assert_eq!(app.pending(&api), None);
+    }
+
+    #[test]
+    fn acts_on_a_container_by_its_id() {
+        let mut app = sample::app();
+        let id = format!("3f2a1b4c5d6e{}", "0".repeat(52));
+        app.containers[0].id.clone_from(&id);
+        press(&mut app, "d");
+        assert!(
+            matches!(app.modal, Some(Modal::Confirm(ref c)) if c.command == "docker rm -f -v 3f2a1b4c5d6e")
+        );
+        let effects = press(&mut app, "y");
+        let [Effect::Start(Task::Run { args, .. })] = &effects[..] else {
+            panic!("{effects:?}");
+        };
+        assert_eq!(args, &["rm", "-f", "-v", id.as_str()]);
     }
 
     #[test]

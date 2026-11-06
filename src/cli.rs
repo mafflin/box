@@ -12,7 +12,7 @@ Opens a dashboard of containers, images and volumes without a command.
 
 Commands:
   list   Print containers, images or volumes as a table
-  prune  Remove stopped containers, dangling images or dangling volumes
+  prune  Remove stopped containers, dangling images or unused volumes
   stop   Stop all running containers
 ";
 
@@ -35,7 +35,7 @@ Removes WHAT, containers first, then volumes, then images.
 Targets:
   containers  Stopped containers
   images      Dangling images
-  volumes     Dangling volumes
+  volumes     Volumes no container uses, named ones too
   all         All of them
 ";
 

@@ -85,12 +85,12 @@ impl Container {
 }
 
 /// Root when the image doesn't set a user
-pub fn shown_user(user: &str) -> &str {
+fn shown_user(user: &str) -> &str {
     if user.is_empty() { "root" } else { user }
 }
 
 /// `/` when the image doesn't set a working directory
-pub fn shown_workdir(workdir: &str) -> &str {
+fn shown_workdir(workdir: &str) -> &str {
     if workdir.is_empty() { "/" } else { workdir }
 }
 
@@ -352,7 +352,8 @@ pub fn ps_ids(ps: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// `docker ps -a --no-trunc --format '{{json .}}'` lines and `docker inspect` of them, in ps' order
+/// `docker ps --no-trunc --format '{{json .}}'` lines and `docker inspect` of them, in ps' order, without those
+/// inspect no longer found
 pub fn containers(ps: &[String], inspect: &str) -> Result<Vec<Container>> {
     let lines: Vec<PsLine> = ps
         .iter()
@@ -375,6 +376,8 @@ pub fn containers(ps: &[String], inspect: &str) -> Result<Vec<Container>> {
         .collect())
 }
 
+/// What comes from the image, like its user, working directory and volumes, made plain text that can't change
+/// the terminal
 fn container(line: PsLine, details: &Inspect) -> Container {
     let ips = details
         .network_settings
@@ -389,9 +392,9 @@ fn container(line: PsLine, details: &Inspect) -> Container {
         let shown: Vec<String> = match bindings {
             Some(bindings) if !bindings.is_empty() => bindings
                 .iter()
-                .map(|binding| format!("{}->{port}", binding.host_port))
+                .map(|binding| plain(&format!("{}->{port}", binding.host_port)))
                 .collect(),
-            _ => vec![port.clone()],
+            _ => vec![plain(port)],
         };
         for port in shown {
             if !ports.contains(&port) {
@@ -402,10 +405,10 @@ fn container(line: PsLine, details: &Inspect) -> Container {
     Container {
         id: line.id,
         name: details.name.trim_start_matches('/').to_string(),
-        image: details.config.image.clone(),
+        image: plain(&details.config.image),
         image_id: details.image.clone(),
-        user: details.config.user.clone(),
-        workdir: details.config.working_dir.clone(),
+        user: plain(&details.config.user),
+        workdir: plain(&details.config.working_dir),
         status: line.status,
         state: details.state.status.clone(),
         exit_code: details.state.exit_code,
@@ -415,7 +418,17 @@ fn container(line: PsLine, details: &Inspect) -> Container {
         open_stdin: details.config.open_stdin,
         ips,
         ports,
-        mounts: details.mounts.clone().unwrap_or_default(),
+        mounts: details
+            .mounts
+            .iter()
+            .flatten()
+            .map(|mount| Mount {
+                name: mount.name.as_deref().map(plain),
+                source: plain(&mount.source),
+                destination: plain(&mount.destination),
+                ..mount.clone()
+            })
+            .collect(),
     }
 }
 
@@ -613,6 +626,28 @@ mod tests {
         );
         assert_eq!(super::containers(&[], "").unwrap(), Vec::<Container>::new());
         assert_eq!(ps_ids(&ps), ["bbb", "gone", "aaa"]);
+    }
+
+    #[test]
+    fn container_text_from_the_image_is_plain() {
+        let ps = vec![r#"{"ID":"aaa","Status":"Up"}"#.to_string()];
+        let inspect = r#"[{
+            "Id": "aaa", "Name": "/web",
+            "Config": {"Image": "app", "User": "\u001b[31mevil", "WorkingDir": "/srv\u001b]0;pwned\u0007"},
+            "NetworkSettings": {"Ports": {"80/tcp\u001b[2J": null}},
+            "Mounts": [{"Type": "volume", "Name": "data", "Source": "/var\u001b[H", "Destination": "/srv\u001b]0;x\u0007"}]
+        }]"#;
+        let web = super::containers(&ps, inspect).unwrap().remove(0);
+        assert_eq!((web.user.as_str(), web.workdir.as_str()), ("evil", "/srv"));
+        assert_eq!(web.ports, ["80/tcp"]);
+        let mount = &web.mounts[0];
+        assert_eq!(
+            (mount.source.as_str(), mount.destination.as_str()),
+            ("/var", "/srv")
+        );
+        assert_eq!(mount.name.as_deref(), Some("data"));
+        // Still the working directory, to highlight
+        assert_eq!(format::mount(mount, &web.workdir).highlight, "/srv");
     }
 
     #[test]

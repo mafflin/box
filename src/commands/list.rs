@@ -2,11 +2,9 @@
 
 use std::collections::HashMap;
 
-use anyhow::Context;
-
 use super::{CONTAINER_IMAGE_FORMAT, all_containers};
 use crate::Result;
-use crate::docker::{Docker, Mount, reference, shown_user, shown_workdir};
+use crate::docker::{self, Docker, reference};
 use crate::format::{self, short_id};
 use crate::table::{self, Cell, Column, cell, lines};
 use crate::theme::Theme;
@@ -47,17 +45,6 @@ const VOLUME_COLUMNS: [Column; 4] = [
     Column::right("CONTAINERS", |theme| theme.count),
 ];
 
-const CONTAINER_FIELDS: [&str; 6] = [
-    "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}",
-    "{{.Config.Image}}",
-    "{{.Config.User}}",
-    "{{range $port, $bindings := .NetworkSettings.Ports}}{{if $bindings}}{{range $bindings}}{{.HostPort}}->{{$port}} {{end}}{{else}}{{$port}} {{end}}{{end}}",
-    "{{json .Mounts}}",
-    "{{.Config.WorkingDir}}",
-];
-
-const CONTAINER_STATUS_FIELDS: [&str; 2] = ["{{.Names}}", "{{.Status}}"];
-
 const IMAGE_FIELDS: [&str; 5] = [
     "{{.Repository}}",
     "{{.Tag}}",
@@ -71,54 +58,40 @@ const CONTAINER_VOLUMES_FORMAT: &str =
 
 const VOLUME_FIELDS: [&str; 3] = ["{{.Name}}", "{{.Driver}}", "{{.CreatedAt}}"];
 
-/// Running containers, with their IPs and mounts instead of the working directory when extended
+/// Running containers, with their IPs and mounts instead of the working directory when extended; those that went
+/// away since docker ps left out
 pub fn containers(docker: &impl Docker, extended: bool, theme: &Theme) -> Result<String> {
-    let containers = records(docker, &["ps"], &CONTAINER_STATUS_FIELDS, &[])?;
-    if containers.is_empty() {
+    let ps = docker.lines(&["ps", "--no-trunc", "--format", "{{json .}}"])?;
+    let ids = docker::ps_ids(&ps);
+    if ids.is_empty() {
         return Ok(String::new());
     }
+    let mut args = vec!["inspect"];
+    args.extend(ids.iter().map(String::as_str));
+    let inspect = docker::partial_output(&args)?;
 
-    let names: Vec<&str> = containers.iter().map(|fields| fields[0].as_str()).collect();
-    let details = records(docker, &["inspect"], &CONTAINER_FIELDS, &names)?;
-    let mut rows = Vec::new();
-    for (container, fields) in containers.iter().zip(&details) {
-        let [ips, image, user, ports, mounts, workdir] = &fields[..] else {
-            unreachable!("records pads its fields");
-        };
-        let mounts: Vec<Mount> = serde_json::from_str::<Option<Vec<Mount>>>(mounts)
-            .context("can't read docker inspect's mounts")?
-            .unwrap_or_default();
-        let mut shown_ports: Vec<&str> = Vec::new();
-        for port in ports.split_whitespace() {
-            if !shown_ports.contains(&port) {
-                shown_ports.push(port);
+    let rows: Vec<Vec<Cell>> = docker::containers(&ps, &inspect)?
+        .iter()
+        .map(|container| {
+            let name = cell(&container.name);
+            let image = cell(&container.image);
+            let user = cell(container.shown_user());
+            let status = cell(&container.status);
+            let ports = lines(&container.ports);
+            if extended {
+                let mounts: Cell = container
+                    .mounts
+                    .iter()
+                    .map(|mount| format::mount(mount, &container.workdir))
+                    .collect();
+                let ips = lines(&container.ips);
+                vec![name, image, user, status, ips, ports, mounts]
+            } else {
+                let workdir = cell(container.shown_workdir());
+                vec![name, image, user, status, ports, workdir]
             }
-        }
-
-        let name = cell(&container[0]);
-        let image = cell(image);
-        let user = cell(shown_user(user));
-        let status = cell(&container[1]);
-        let ports = lines(shown_ports);
-        rows.push(if extended {
-            let mounts: Cell = mounts
-                .iter()
-                .map(|mount| format::mount(mount, workdir))
-                .collect();
-            vec![
-                name,
-                image,
-                user,
-                status,
-                lines(ips.split_whitespace()),
-                ports,
-                mounts,
-            ]
-        } else {
-            let workdir = cell(shown_workdir(workdir));
-            vec![name, image, user, status, ports, workdir]
-        });
-    }
+        })
+        .collect();
 
     let columns: &[Column] = if extended {
         &EXTENDED_CONTAINER_COLUMNS

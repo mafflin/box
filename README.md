@@ -21,6 +21,8 @@ box prune containers|images|volumes|all   # containers first, then volumes, then
 box stop                                  # all running containers
 ```
 
+Pruning removes every volume no container uses, named ones too, unlike `docker volume prune`, which since Docker 23 only removes anonymous ones. Containers go first, so a stopped container's volumes go in the same run, unless another container uses them. That holds for `box prune all` and for `p` in the dashboard, where all three are ticked to start with.
+
 ## Dashboard
 
 | Key | Action |
@@ -34,7 +36,7 @@ box stop                                  # all running containers
 | `s` `r` `d` | start/stop, restart, remove (confirm with `y`) |
 | `l` `enter` | follow logs (`space` pauses) |
 | `e` | shell in a running container: bash, else sh |
-| `p` | prune stopped containers and dangling volumes and images |
+| `p` | prune stopped containers, unused volumes (named ones too) and dangling images |
 | `?` `q` | help, quit |
 
 Containers are sorted most recent first: running ones by when they started, then stopped ones by when they stopped. `T` sorts by that time for containers and by creation time for images and volumes.

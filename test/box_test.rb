@@ -92,26 +92,49 @@ class BoxTest < Minitest::Test
 
   def test_list_containers_prints_a_table
     running(
-      'web' => details(ports: '8080->80/tcp 8080->80/tcp 443/tcp ', status: 'Up 2 days',
-                       mounts: [volume('html', '/srv/html')]),
-      'app' => details(ips: '172.18.0.3 172.19.0.4 ', image: 'app:dev', user: 'ubuntu', workdir: '/app',
+      'web' => details(ports: { '80/tcp' => [{ 'HostPort' => '8080' }, { 'HostPort' => '8080' }], '443/tcp' => nil },
+                       status: 'Up 2 days', mounts: [volume('html', '/srv/html')]),
+      'app' => details(ips: %w[172.18.0.3 172.19.0.4], image: 'app:dev', user: 'ubuntu', workdir: '/app',
                        status: 'Up 45 minutes (healthy)',
                        mounts: [bind("#{@home}/src/app", '/app'), bind('/etc/hosts', '/etc/hosts', writable: false)]),
     )
 
     assert_equal <<~TABLE, plain(box('list', 'containers').first)
       NAME  IMAGE       USER    STATUS                   PORTS         WORKDIR
-      web   nginx:1.27  root    Up 2 days                8080->80/tcp  /
-                                                         443/tcp
+      web   nginx:1.27  root    Up 2 days                443/tcp       /
+                                                         8080->80/tcp
       app   app:dev     ubuntu  Up 45 minutes (healthy)                /app
     TABLE
     assert_equal <<~TABLE, plain(box('list', 'containers', '-x').first)
       NAME  IMAGE       USER    STATUS                   IP          PORTS         MOUNTS
-      web   nginx:1.27  root    Up 2 days                172.17.0.2  8080->80/tcp  html:/srv/html
-                                                                     443/tcp
+      web   nginx:1.27  root    Up 2 days                172.17.0.2  443/tcp       html:/srv/html
+                                                                     8080->80/tcp
       app   app:dev     ubuntu  Up 45 minutes (healthy)  172.18.0.3                ~/src/app:/app
                                                          172.19.0.4                /etc/hosts:/etc/hosts:ro
     TABLE
+  end
+
+  def test_list_containers_leaves_out_those_gone_since_ps
+    running('web' => details, 'gone' => details)
+    # Docker inspect prints the ones it found, then fails for the rest
+    respond('inspect', 'web-id', 'gone-id', stdout: JSON.generate([inspected('web', details.first)]), status: 1)
+
+    stdout, stderr, status = box('list', 'containers')
+
+    assert status.success?, stderr
+    assert_equal(%w[NAME web], plain(stdout).lines.map { |line| line.split.first })
+    assert_empty stderr
+  end
+
+  def test_list_containers_shows_what_the_image_sets_as_plain_text
+    running('web' => details(user: "\e[31mevil", workdir: "/srv\e]0;pwned\a"))
+
+    stdout, = box('list', 'containers')
+
+    assert_includes stdout, "\e[90mevil\e[0m"
+    assert_equal '/srv', plain(stdout).lines.last.split.last
+    refute_includes stdout, "\e[31m"
+    refute_includes stdout, "\e]"
   end
 
   def test_list_extended_containers_formats_mounts
@@ -239,19 +262,32 @@ class BoxTest < Minitest::Test
     "#{driver}\t#{created_at}"
   end
 
-  # Running containers, either names or names mapped to their details
+  # Running containers, either names or names mapped to their details, with IDs like `web-id`
   def running(*containers)
     containers = containers.first.is_a?(Hash) ? containers.first : containers.to_h { |name| [name, details] }
     respond('ps', '--format', '{{.Names}}', stdout: containers.keys.map { |name| "#{name}\n" }.join)
-    respond('ps', '--format', "{{.Names}}\t{{.Status}}",
-            stdout: containers.map { |name, (_, status)| "#{name}\t#{status}\n" }.join)
-    respond('inspect', stdout: containers.values.map { |line, _| "#{line}\n" }.join)
+    ps = containers.map do |name, (_, status)|
+      "#{JSON.generate('ID' => "#{name}-id", 'Names' => name, 'Status' => status)}\n"
+    end
+    respond('ps', '--no-trunc', '--format', '{{json .}}', stdout: ps.join)
+    respond('inspect', stdout: JSON.generate(containers.map { |name, (inspect, _)| inspected(name, inspect) }))
   end
 
-  # One container's docker inspect output for box's template and its docker ps status
-  def details(ips: '172.17.0.2 ', image: 'nginx:1.27', user: '', status: 'Up 5 minutes', ports: '', mounts: [],
+  # One container's docker inspect output, without its ID and name, and its docker ps status
+  def details(ips: ['172.17.0.2'], image: 'nginx:1.27', user: '', status: 'Up 5 minutes', ports: {}, mounts: [],
               workdir: '')
-    [[ips, image, user, ports, JSON.generate(mounts), workdir].join("\t"), status]
+    networks = ips.each_with_index.to_h { |ip, index| ["network#{index}", { 'IPAddress' => ip }] }
+    inspect = {
+      'Config' => { 'Image' => image, 'User' => user, 'WorkingDir' => workdir },
+      'State' => { 'Status' => 'running' },
+      'NetworkSettings' => { 'Networks' => networks, 'Ports' => ports },
+      'Mounts' => mounts,
+    }
+    [inspect, status]
+  end
+
+  def inspected(name, inspect)
+    { 'Id' => "#{name}-id", 'Name' => "/#{name}", **inspect }
   end
 
   def volume(name, destination)
