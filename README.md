@@ -28,7 +28,7 @@ box stop                                  # all running containers
 | `↑↓` `jk` `gG` PgUp/PgDn, wheel | move |
 | `tab` `123` `←→` | switch view |
 | `/` | filter (`enter` keep, `esc` clear) |
-| `P M N S T` | sort: CPU, memory, name, size, created (again reverses) |
+| `P M N S T` | sort: CPU, memory, name, size, time (again reverses) |
 | `a` | running / all containers |
 | `i` | details: below, beside, off |
 | `s` `r` `d` | start/stop, restart, remove (confirm with `y`) |
@@ -36,6 +36,8 @@ box stop                                  # all running containers
 | `e` | shell in a running container: bash, else sh |
 | `p` | prune stopped containers and dangling volumes and images |
 | `?` `q` | help, quit |
+
+Containers are sorted most recent first: running ones by when they started, then stopped ones by when they stopped. `T` sorts by that time for containers and by creation time for images and volumes.
 
 Containers started with `-t` or `-i` have no logs view, since their output is a terminal session. Log lines are stripped of escape sequences and control characters, so a container can't change your terminal.
 

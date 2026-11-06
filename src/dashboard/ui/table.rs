@@ -213,7 +213,8 @@ fn containers(app: &App, rows: &[usize]) -> (Vec<Column>, Vec<bool>) {
     let theme = app.theme;
     let mut name = Column::new("NAME", Some(SortKey::Name)).flex(2, 8);
     let mut image = Column::new("IMAGE", None).flex(3, 10);
-    let mut status = Column::new("STATUS", None).flex(1, 10);
+    // Up for how long, so sorted by the start
+    let mut status = Column::new("STATUS", Some(SortKey::Started)).flex(1, 10);
     let mut cpu = Column::new("CPU%", Some(SortKey::Cpu)).right();
     let mut memory = Column::new("MEM", Some(SortKey::Memory)).right();
     let mut network = Column::new("NET I/O", None).right();

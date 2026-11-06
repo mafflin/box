@@ -40,6 +40,9 @@ pub struct Container {
     /// `running`, `exited`, `created`, `paused`, `restarting`, `removing` or `dead`
     pub state: String,
     pub exit_code: i64,
+    /// When it last started and stopped, in seconds since the epoch, 0 when it never did
+    pub started_at: i64,
+    pub finished_at: i64,
     pub tty: bool,
     pub open_stdin: bool,
     pub ips: Vec<String>,
@@ -242,6 +245,8 @@ struct Config {
 struct State {
     status: String,
     exit_code: i64,
+    started_at: String,
+    finished_at: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -404,12 +409,23 @@ fn container(line: PsLine, details: &Inspect) -> Container {
         status: line.status,
         state: details.state.status.clone(),
         exit_code: details.state.exit_code,
+        started_at: epoch_seconds(&details.state.started_at),
+        finished_at: epoch_seconds(&details.state.finished_at),
         tty: details.config.tty,
         open_stdin: details.config.open_stdin,
         ips,
         ports,
         mounts: details.mounts.clone().unwrap_or_default(),
     }
+}
+
+/// An ISO 8601 time like `2026-11-06T13:08:00.123456789Z` in seconds since the epoch; 0 for docker's
+/// `0001-01-01T00:00:00Z`, which means never, or for what isn't one
+fn epoch_seconds(timestamp: &str) -> i64 {
+    timestamp
+        .parse::<jiff::Timestamp>()
+        .map_or(0, jiff::Timestamp::as_second)
+        .max(0)
 }
 
 /// The images' IDs from `docker image ls --no-trunc --format '{{json .}}'` lines, once for several tags
@@ -518,10 +534,7 @@ pub fn volumes(inspect: &str) -> Result<Vec<Volume>> {
         .into_iter()
         .map(|volume| Volume {
             created: format::local_date(&volume.created_at),
-            created_at: volume
-                .created_at
-                .parse::<jiff::Timestamp>()
-                .map_or(0, jiff::Timestamp::as_second),
+            created_at: epoch_seconds(&volume.created_at),
             name: volume.name,
             driver: volume.driver,
             mountpoint: volume.mountpoint,
@@ -559,7 +572,8 @@ mod tests {
     const INSPECT: &str = r#"[{
         "Id": "aaa", "Name": "/web", "Image": "sha256:img",
         "Config": {"Image": "nginx:1.27", "User": "", "WorkingDir": "/srv", "Tty": false, "OpenStdin": true},
-        "State": {"Status": "running", "ExitCode": 0},
+        "State": {"Status": "running", "ExitCode": 0, "StartedAt": "2026-10-15T09:30:00.123456789Z",
+            "FinishedAt": "0001-01-01T00:00:00Z"},
         "NetworkSettings": {
             "Networks": {"b": {"IPAddress": "172.18.0.3"}, "a": {"IPAddress": ""}},
             "Ports": {
@@ -583,6 +597,9 @@ mod tests {
         let (db, web) = (&containers[0], &containers[1]);
         assert_eq!(db.name, "db");
         assert_eq!(db.exit_code, 1);
+        assert_eq!(db.started_at, 0);
+        assert_eq!(web.started_at, 1_792_056_600);
+        assert_eq!(web.finished_at, 0);
         assert!(!db.is_up());
         assert_eq!(web.status, "Up 2 days");
         assert_eq!(web.ips, ["172.18.0.3"]);

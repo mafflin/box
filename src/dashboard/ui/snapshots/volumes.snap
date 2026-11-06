@@ -25,4 +25,4 @@ expression: screen
 │                                                                                                                      │
 │                                                                                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- ↑↓ move  tab view  d remove  / filter  i details  N T sort  p prune  ? help  q quit
+ d remove  │  / filter  i details  N T sort  tab view  p prune                                           ? help  q quit

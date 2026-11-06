@@ -2,9 +2,9 @@
 source: src/dashboard/ui/mod.rs
 expression: screen
 ---
-  Containers 5   Images 6   Volumes 4               sort cpu ▼   filter nothing
+  Containers 5   Images 6   Volumes 4           sort started ▼   filter nothing
 ╭─ Containers ─────────────────────────────────────────────────────────────────╮
-│ NAME  IMAGE  STATUS  CPU% ▼  MEM  NET I/O  PIDS  PORTS                       │
+│ NAME  IMAGE  STATUS ▼  CPU%  MEM  NET I/O  PIDS  PORTS                       │
 │                                                                              │
 │                          nothing matches “nothing”                           │
 │                                                                              │
@@ -21,4 +21,4 @@ expression: screen
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- ↑↓ move  tab view  s stop  r restart  d remove  l logs  e shell  / filter
+ s stop  r restart  d remove  l logs  e shell  │  / filter       ? help  q quit

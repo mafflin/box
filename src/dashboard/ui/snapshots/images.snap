@@ -25,4 +25,4 @@ expression: screen
 │                                                                                                                      │
 │ dangling · removed by p prune                                                                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- ↑↓ move  tab view  d remove  / filter  i details  N S T sort  p prune  ? help  q quit
+ d remove  │  / filter  i details  N S T sort  tab view  p prune                                         ? help  q quit

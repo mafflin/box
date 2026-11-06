@@ -8,6 +8,9 @@ use crate::docker::{Container, Image, Mount, Stats, Volume};
 use crate::settings::Accent;
 
 const MIB: u64 = 1024 * 1024;
+/// When the sample's statuses were taken, in seconds since the epoch
+const NOW: i64 = 1_794_000_000;
+const HOUR: i64 = 3600;
 const GIB: u64 = 1024 * MIB;
 
 fn id(seed: char) -> String {
@@ -34,8 +37,9 @@ fn bind(source: &str, destination: &str, rw: bool) -> Mount {
     }
 }
 
-fn running(name: &str, image: &str, image_seed: char, status: &str) -> Container {
+fn running(name: &str, image: &str, image_seed: char, status: &str, up: i64) -> Container {
     Container {
+        started_at: NOW - up,
         id: format!("{name}-id"),
         name: name.into(),
         image: image.into(),
@@ -56,13 +60,19 @@ fn containers() -> Vec<Container> {
             bind("/home/me/work/api", "/app", true),
             volume_mount("bundle", "/usr/local/bundle"),
         ],
-        ..running("api", "acme/api:dev", 'a', "Up 5 hours (healthy)")
+        ..running(
+            "api",
+            "acme/api:dev",
+            'a',
+            "Up 40 minutes (healthy)",
+            40 * 60,
+        )
     };
     let db = Container {
         ips: vec!["172.18.0.4".into()],
         ports: vec!["5432/tcp".into()],
         mounts: vec![volume_mount("pgdata", "/var/lib/postgresql/data")],
-        ..running("db", "postgres:16", 'b', "Up 2 days")
+        ..running("db", "postgres:16", 'b', "Up 2 days", 48 * HOUR)
     };
     let web = Container {
         workdir: "/usr/share/nginx/html".into(),
@@ -72,22 +82,23 @@ fn containers() -> Vec<Container> {
             bind("/home/me/site", "/usr/share/nginx/html", false),
             volume_mount("nginx-cache", "/var/cache/nginx"),
         ],
-        ..running("web", "nginx:1.27-alpine", 'c', "Up 2 days")
+        ..running("web", "nginx:1.27-alpine", 'c', "Up 3 days", 72 * HOUR)
     };
     let console = Container {
         workdir: "/app".into(),
         tty: true,
         open_stdin: true,
         ips: vec!["172.18.0.8".into()],
-        ..running("console", "ruby:3.3-slim", 'd', "Up 40 minutes")
+        ..running("console", "ruby:3.3-slim", 'd', "Up 5 hours", 5 * HOUR)
     };
     let worker = Container {
         user: "app".into(),
         workdir: "/app".into(),
         state: "exited".into(),
         status: "Exited (0) 3 hours ago".into(),
+        finished_at: NOW - 3 * HOUR,
         mounts: vec![bind("/home/me/work/api", "/app", true)],
-        ..running("worker", "acme/api:dev", 'a', "")
+        ..running("worker", "acme/api:dev", 'a', "", 7 * HOUR)
     };
 
     vec![api, db, web, console, worker]

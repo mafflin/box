@@ -45,7 +45,12 @@ impl View {
 
     fn sort_keys(self) -> &'static [SortKey] {
         match self {
-            Self::Containers => &[SortKey::Name, SortKey::Cpu, SortKey::Memory],
+            Self::Containers => &[
+                SortKey::Name,
+                SortKey::Cpu,
+                SortKey::Memory,
+                SortKey::Started,
+            ],
             Self::Images => &[SortKey::Name, SortKey::Size, SortKey::Created],
             Self::Volumes => &[SortKey::Name, SortKey::Created],
         }
@@ -84,6 +89,8 @@ pub enum SortKey {
     Memory,
     Size,
     Created,
+    /// A container's last start
+    Started,
 }
 
 impl SortKey {
@@ -94,15 +101,18 @@ impl SortKey {
             Self::Memory => "mem",
             Self::Size => "size",
             Self::Created => "created",
+            Self::Started => "started",
         }
     }
 
-    fn from_key(key: char) -> Option<Self> {
+    /// `T` is time: when containers started, when images and volumes were created
+    fn from_key(key: char, view: View) -> Option<Self> {
         match key {
             'N' => Some(Self::Name),
             'P' => Some(Self::Cpu),
             'M' => Some(Self::Memory),
             'S' => Some(Self::Size),
+            'T' if view == View::Containers => Some(Self::Started),
             'T' => Some(Self::Created),
             _ => None,
         }
@@ -364,7 +374,7 @@ impl App {
             log_page: 10,
             sort: [
                 Sort {
-                    key: SortKey::Cpu,
+                    key: SortKey::Started,
                     descending: true,
                 },
                 Sort {
@@ -496,6 +506,18 @@ impl App {
                         .map(|stats| stats.memory)
                 };
                 memory(a).cmp(&memory(b))
+            }
+            // When what its status shows happened: up since, or exited since
+            (View::Containers, SortKey::Started) => {
+                let time = |i: usize| {
+                    let container = &self.containers[i];
+                    if container.is_up() {
+                        container.started_at
+                    } else {
+                        container.finished_at
+                    }
+                };
+                time(a).cmp(&time(b))
             }
             (View::Images, SortKey::Size) => {
                 self.images[a].size_bytes.cmp(&self.images[b].size_bytes)
@@ -803,7 +825,7 @@ impl App {
             KeyCode::Char('l') | KeyCode::Enter => return self.open_logs(),
             KeyCode::Char('e') => return self.open_shell(),
             KeyCode::Char(c) => {
-                if let Some(key) = SortKey::from_key(c) {
+                if let Some(key) = SortKey::from_key(c, self.view) {
                     self.sort_by(key);
                 }
             }
@@ -1182,21 +1204,29 @@ mod tests {
     }
 
     #[test]
-    fn sorts_running_containers_first_by_cpu() {
+    fn sorts_running_containers_first_by_start() {
         let mut app = sample::app();
-        let names: Vec<&str> = app
-            .rows(View::Containers)
-            .iter()
-            .map(|&i| app.containers[i].name.as_str())
-            .collect();
-        assert_eq!(names, ["api", "db", "web", "console", "worker"]);
+        let names = |app: &App| -> Vec<String> {
+            app.rows(View::Containers)
+                .iter()
+                .map(|&i| app.containers[i].name.clone())
+                .collect()
+        };
+        assert_eq!(
+            app.sort[0],
+            Sort {
+                key: SortKey::Started,
+                descending: true
+            }
+        );
+        // The stopped worker started after db and web, but stays below them
+        assert_eq!(names(&app), ["api", "console", "db", "web", "worker"]);
+        press(&mut app, "T");
+        assert_eq!(names(&app), ["web", "db", "console", "api", "worker"]);
+        press(&mut app, "P");
+        assert_eq!(names(&app), ["api", "db", "web", "console", "worker"]);
         press(&mut app, "N");
-        let names: Vec<&str> = app
-            .rows(View::Containers)
-            .iter()
-            .map(|&i| app.containers[i].name.as_str())
-            .collect();
-        assert_eq!(names, ["api", "console", "db", "web", "worker"]);
+        assert_eq!(names(&app), ["api", "console", "db", "web", "worker"]);
         press(&mut app, "N");
         assert_eq!(
             app.sort[0],
@@ -1210,12 +1240,30 @@ mod tests {
             app.toast.as_ref().unwrap().text,
             "containers can't be sorted by size"
         );
+
+        press(&mut app, "T");
+        // Stopped ones by when they stopped, as their status shows
+        let mut snapshot = sample::snapshot();
+        let worker = snapshot.containers.last().unwrap().clone();
+        snapshot.containers.push(Container {
+            id: "cron-id".into(),
+            name: "cron".into(),
+            status: "Exited (1) 1 minute ago".into(),
+            started_at: worker.started_at - 240 * 3600,
+            finished_at: worker.finished_at + 3 * 3600 - 60,
+            ..worker
+        });
+        app.update(Action::Snapshot(Ok(snapshot)), Instant::now());
+        assert_eq!(
+            names(&app),
+            ["api", "console", "db", "web", "cron", "worker"]
+        );
     }
 
     #[test]
     fn selection_follows_the_item_when_rows_move() {
         let mut app = sample::app();
-        press(&mut app, "j");
+        press(&mut app, "Pj");
         assert_eq!(selected_name(&mut app), "db");
         // db overtakes api
         let db = app

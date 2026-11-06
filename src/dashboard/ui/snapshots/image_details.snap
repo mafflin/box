@@ -10,7 +10,7 @@ expression: screen
 │ acme/api:latest    aaaaaaaaaaaa               1.21GB  3 hours ago           2             ││          acme/api:latest                    │
 │ nginx:1.27-alpine  cccccccccccc               48.2MB  12 days ago           1             ││ size     1.21GB                             │
 │ postgres:16        bbbbbbbbbbbb  linux/amd64   438MB  2 weeks ago           1             ││ created  3 hours ago                        │
-│ ruby:3.3-slim      dddddddddddd                216MB  3 weeks ago           1             ││ used by  api  Up 5 hours (healthy)          │
+│ ruby:3.3-slim      dddddddddddd                216MB  3 weeks ago           1             ││ used by  api  Up 40 minutes (healthy)       │
 │                                                                                           ││          worker  Exited (0) 3 hours ago     │
 │                                                                                           ││ command  /app/bin/docker-entrypoint ./bin/r │
 │                                                                                           ││ ports    3000/tcp                           │
@@ -31,4 +31,4 @@ expression: screen
 │                                                                                           ││                                             │
 │                                                                                           ││                                             │
 ╰───────────────────────────────────────────────────────────────────────────────────── 2/6 ─╯╰─────────────────────────────────────────────╯
- ↑↓ move  tab view  d remove  / filter  i details  N S T sort  p prune  ? help  q quit                                       details: right
+ d remove  │  / filter  i details  N S T sort  tab view  p prune                                                             details: right

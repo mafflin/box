@@ -2,13 +2,13 @@
 source: src/dashboard/ui/mod.rs
 expression: screen
 ---
-  Containers 5   Images 6   Volumes 4                                      sort cpu ▼   showing all
+  Containers 5   Images 6   Volumes 4                                  sort started ▼   showing all
 ╭─ Containers ─────────────────────────────────────────────────────────────────────────────────────╮
-│ NAME     IMAGE              STATUS      CPU% ▼   MEM    NET I/O  PIDS  PORTS                     │
-│ api      acme/api:dev       Up 5 hour…    18.0  649M  75M / 10M    12  3000->3000/tcp            │
-│ db       postgres:16        Up 2 days      6.0  311M  75M / 10M    12  5432/tcp                  │
-│ web      n╭─ Keys ───────────────────────────────────────────────────────────────────╮43->443/t… │
-│ console  r│                                                                          │           │
+│ NAME     IMAGE              STATUS ▼     CPU%   MEM    NET I/O  PIDS  PORTS                      │
+│ api      acme/api:dev       Up 40 minu…  18.0  649M  75M / 10M    12  3000->3000/tcp             │
+│ console  ruby:3.3-slim      Up 5 hours    0.1   35M  75M / 10M    12                             │
+│ db       p╭─ Keys ───────────────────────────────────────────────────────────────────╮           │
+│ web      n│                                                                          │3->443/tcp │
 │ worker   a│  General                                Containers                       │           │
 │           │  ↑↓ j k      move                       s           stop / start         │           │
 │           │  g G         top / bottom               r           restart              │           │
@@ -16,11 +16,11 @@ expression: screen
 │           │  /           filter                     l enter     logs (not for -it)   │           │
 │           │  esc         clear filter               e           shell (bash or sh)   │           │
 │           │  P M N       sort cpu / mem / name      a           show stopped         │           │
-│           │  S T         sort size / created                                         │           │
-│           │  i           details bottom/right/off   Images · Volumes                 │           │
-│           │  p           prune                      d           remove if unused     │           │
-╰───────────│  q           quit                                                        │───── 1/5 ─╯
-╭─ api ─────│                                                                          │───────────╮
+│           │  S           sort size                                                   │           │
+│           │  T           sort started / created     Images · Volumes                 │           │
+│           │  i           details bottom/right/off   d           remove if unused     │           │
+╰───────────│  p           prune                                                       │───── 1/5 ─╯
+╭─ api ─────│  q           quit                                                        │───────────╮
 │ image    a│                                                                          │           │
 │ status   U│                                                                          │▄▃▁        │
 │ ip       1│                                                                          │███▅▂  ▂▆▄ │
@@ -31,4 +31,4 @@ expression: screen
 │ mounts   /home/me/work/api:/app                    █████████████████████████████████████████████ │
 │          bundle:/usr/local/bundle                  NET ↓ 75M  ↑ 10M   PIDS 12                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
- ↑↓ move  tab view  s stop  r restart  d remove  l logs  e shell  / filter  a running only
+ s stop  r restart  d remove  l logs  e shell  │  / filter  a running  p prune       ? help  q quit

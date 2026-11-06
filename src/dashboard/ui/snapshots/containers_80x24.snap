@@ -2,14 +2,14 @@
 source: src/dashboard/ui/mod.rs
 expression: screen
 ---
-  Containers 5   Images 6   Volumes 4                  sort cpu ▼   showing all
+  Containers 5   Images 6   Volumes 4              sort started ▼   showing all
 ╭─ Containers ─────────────────────────────────────────────────────────────────╮
-│ NAME     IMAGE        STATUS      CPU% ▼   MEM    NET I/O  PIDS  PORTS       │
-│ api      acme/api:d…  Up 5 hour…    18.0  649M  75M / 10M    12  3000->3000… │
-│ db       postgres:16  Up 2 days      6.0  311M  75M / 10M    12  5432/tcp    │
-│ web      nginx:1.27…  Up 2 days      1.5   14M  75M / 10M    12  8080->80/t… │
-│ console  ruby:3.3-s…  Up 40 min…     0.1   35M  75M / 10M    12              │
-│ worker   acme/api:d…  Exited (0…       —     —          —     —              │
+│ NAME     IMAGE         STATUS ▼    CPU%   MEM    NET I/O  PIDS  PORTS        │
+│ api      acme/api:dev  Up 40 min…  18.0  649M  75M / 10M    12  3000->3000/… │
+│ console  ruby:3.3-sl…  Up 5 hours   0.1   35M  75M / 10M    12               │
+│ db       postgres:16   Up 2 days    6.0  311M  75M / 10M    12  5432/tcp     │
+│ web      nginx:1.27-…  Up 3 days    1.5   14M  75M / 10M    12  8080->80/tc… │
+│ worker   acme/api:dev  Exited (0…     —     —          —     —               │
 │                                                                              │
 │                                                                              │
 │                                                                              │
@@ -18,11 +18,11 @@ expression: screen
 ╰──────────────────────────────────────────────────────────────────────── 1/5 ─╯
 ╭─ api ────────────────────────────────────────────────────────────────────────╮
 │ image    acme/api:dev                    CPU 18.0%   peak 30.6%              │
-│ status   Up 5 hours (healthy)            ▆▄▃▁    ▂▄▅▆▆▅▄▂     ▃▄▅▆▆▅▃▁    ▁  │
+│ status   Up 40 minutes (healthy)         ▆▄▃▁    ▂▄▅▆▆▅▄▂     ▃▄▅▆▆▅▃▁    ▁  │
 │ ip       172.18.0.3                      ████▆▃▅▇█████████▅▃▆█████████▆▄▄▇██ │
 │          172.19.0.4                      MEM 649M / 2.0G                     │
 │ user     app                             ▄▄▃▁   ▁▂▃▄▅▅▄▃▂▁   ▁▃▄▄▅▄▄▃▂    ▂▅ │
 │ workdir  /app                            █████▆▇██████████▇▆███████████▇▇███ │
 │ … 3 more                                 NET ↓ 75M  ↑ 10M   PIDS 12          │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- ↑↓ move  tab view  s stop  r restart  d remove  l logs  e shell  / filter
+ s stop  r restart  d remove  l logs  e shell  │  / filter       ? help  q quit
