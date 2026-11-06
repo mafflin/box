@@ -1,0 +1,24 @@
+---
+source: src/dashboard/ui/mod.rs
+expression: screen
+---
+  Containers 5   Images 5   Volumes 4               sort cpu ▼   filter nothing
+╭─ Containers ─────────────────────────────────────────────────────────────────╮
+│ NAME  IMAGE  STATUS  CPU% ▼  MEM  NET I/O  PIDS  PORTS                       │
+│                                                                              │
+│                          nothing matches “nothing”                           │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ nothing selected                                                             │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ ↑↓ move  tab view  s stop  r restart  d remove  l logs  / filter

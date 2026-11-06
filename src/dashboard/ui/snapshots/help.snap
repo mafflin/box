@@ -1,0 +1,34 @@
+---
+source: src/dashboard/ui/mod.rs
+expression: screen
+---
+  Containers 5   Images 5   Volumes 4                                      sort cpu ▼   showing all
+╭─ Containers ─────────────────────────────────────────────────────────────────────────────────────╮
+│ NAME     IMAGE              STATUS      CPU% ▼   MEM    NET I/O  PIDS  PORTS                     │
+│ api      acme/api:dev       Up 5 hour…    18.0  649M  75M / 10M    12  3000->3000/tcp            │
+│ db       postgres:16        Up 2 days      6.0  311M  75M / 10M    12  5432/tcp                  │
+│ web      n╭─ Keys ───────────────────────────────────────────────────────────────────╮43->443/t… │
+│ console  r│                                                                          │           │
+│ worker   a│  General                                Containers                       │           │
+│           │  ↑↓ j k      move                       s           stop / start         │           │
+│           │  g G         top / bottom               r           restart              │           │
+│           │  tab 1 2 3   switch view                d           remove               │           │
+│           │  /           filter                     l enter     logs (not for -it)   │           │
+│           │  esc         clear filter               a           show stopped         │           │
+│           │  P M N       sort cpu / mem / name                                       │           │
+│           │  S T         sort size / created        Images · Volumes                 │           │
+│           │  i           details bottom/right/off   d           remove if unused     │           │
+│           │  p           prune                                                       │           │
+╰───────────│  q           quit                                                        │───── 1/5 ─╯
+╭─ api ─────│                                                                          │───────────╮
+│ image    a│                                                                          │           │
+│ status   U│                                                                          │▄▃▁        │
+│ ip       1│                                                                          │███▅▂  ▂▆▄ │
+│          1│  any key closes                                                          │█████▅▆███ │
+│ user     a╰──────────────────────────────────────────────────────────────────────────╯           │
+│ workdir  /app                                             ▂▃▃▃▂       ▁▂▃▃▂▁       ▂▃▃▃▂       ▃ │
+│ ports    3000->3000/tcp                            ▇▅▃▂▄▆███████▆▄▁▃▅▇██████▇▅▃▁▄▆███████▆▄▂▂▅▇█ │
+│ mounts   /home/me/work/api:/app                    █████████████████████████████████████████████ │
+│          bundle:/usr/local/bundle                  NET ↓ 75M  ↑ 10M   PIDS 12                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ ↑↓ move  tab view  s stop  r restart  d remove  l logs  / filter  a running only  i details

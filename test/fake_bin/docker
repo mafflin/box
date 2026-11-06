@@ -1,0 +1,18 @@
+#!/usr/bin/env -S ruby --disable-gems
+# frozen_string_literal: true
+
+# Stands in for docker in tests: logs each call to calls.jsonl and answers from responses.json,
+# both in $FAKE_DOCKER_DIR. The response with the longest matching argument prefix wins,
+# a call nothing matches succeeds with no output.
+
+require 'json'
+
+fake_docker_dir = ENV.fetch('FAKE_DOCKER_DIR')
+File.open(File.join(fake_docker_dir, 'calls.jsonl'), 'a') { |file| file.puts(JSON.generate(ARGV)) }
+
+responses = JSON.parse(File.read(File.join(fake_docker_dir, 'responses.json')))
+response = responses.select { |candidate| ARGV.first(candidate['args'].size) == candidate['args'] }
+                    .max_by { |candidate| candidate['args'].size }
+
+$stdout.write(response ? response['stdout'] : '')
+exit(response ? response['status'] : 0)

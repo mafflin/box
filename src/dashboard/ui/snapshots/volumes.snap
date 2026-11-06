@@ -1,0 +1,28 @@
+---
+source: src/dashboard/ui/mod.rs
+expression: screen
+---
+  Containers 5   Images 5   Volumes 4                                                                       sort name ▲
+╭─ Volumes ────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ VOLUME ▲     DRIVER           CREATED  CONTAINERS                                                                    │
+│ bundle       local   2026-10-29 11:45           1                                                                    │
+│ nginx-cache  local   2026-10-24 18:02           1                                                                    │
+│ old-data     local   2026-03-02 08:00           0                                                                    │
+│ pgdata       local   2026-10-15 09:30           1                                                                    │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────── 1/4 ─╯
+╭─ bundle ─────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ name     bundle                                                                                                      │
+│ driver   local                                                                                                       │
+│ mount    /var/lib/docker/volumes/bundle/_data                                                                        │
+│ created  2026-10-29 11:45                                                                                            │
+│ used by  api → /usr/local/bundle                                                                                     │
+│                                                                                                                      │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ ↑↓ move  tab view  d remove  / filter  i details  N T sort  p prune  ? help  q quit

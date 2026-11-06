@@ -1,0 +1,1389 @@
+//! The dashboard's state and how keys and docker's updates change it; no threads or terminal here
+
+use std::collections::{HashMap, VecDeque};
+use std::time::{Duration, Instant};
+
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+use super::theme::Theme;
+use crate::commands::PruneTarget;
+use crate::docker::{Container, Image, Stats, Volume};
+use crate::format;
+
+const HISTORY: usize = 240;
+const MAX_LOG_LINES: usize = 5000;
+const MAX_LOG_LINE_BYTES: usize = 4096;
+/// How far back a line from the other output can go
+const LOG_REORDER: usize = 200;
+const TOAST_TIME: Duration = Duration::from_millis(3500);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum View {
+    Containers,
+    Images,
+    Volumes,
+}
+
+impl View {
+    pub const ALL: [Self; 3] = [Self::Containers, Self::Images, Self::Volumes];
+
+    pub fn index(self) -> usize {
+        match self {
+            Self::Containers => 0,
+            Self::Images => 1,
+            Self::Volumes => 2,
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Containers => "Containers",
+            Self::Images => "Images",
+            Self::Volumes => "Volumes",
+        }
+    }
+
+    fn sort_keys(self) -> &'static [SortKey] {
+        match self {
+            Self::Containers => &[SortKey::Name, SortKey::Cpu, SortKey::Memory],
+            Self::Images => &[SortKey::Name, SortKey::Size, SortKey::Created],
+            Self::Volumes => &[SortKey::Name, SortKey::Created],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Details {
+    Bottom,
+    Right,
+    Off,
+}
+
+impl Details {
+    fn next(self) -> Self {
+        match self {
+            Self::Bottom => Self::Right,
+            Self::Right => Self::Off,
+            Self::Off => Self::Bottom,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Bottom => "bottom",
+            Self::Right => "right",
+            Self::Off => "off",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SortKey {
+    Name,
+    Cpu,
+    Memory,
+    Size,
+    Created,
+}
+
+impl SortKey {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Name => "name",
+            Self::Cpu => "cpu",
+            Self::Memory => "mem",
+            Self::Size => "size",
+            Self::Created => "created",
+        }
+    }
+
+    fn from_key(key: char) -> Option<Self> {
+        match key {
+            'N' => Some(Self::Name),
+            'P' => Some(Self::Cpu),
+            'M' => Some(Self::Memory),
+            'S' => Some(Self::Size),
+            'T' => Some(Self::Created),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Sort {
+    pub key: SortKey,
+    pub descending: bool,
+}
+
+/// A container change box asked docker for, shown until docker's next update
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pending {
+    Stopping,
+    Starting,
+    Restarting,
+    Removing,
+}
+
+impl Pending {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Stopping => "Stopping…",
+            Self::Starting => "Starting…",
+            Self::Restarting => "Restarting…",
+            Self::Removing => "Removing…",
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct History {
+    pub cpu: VecDeque<f64>,
+    pub memory: VecDeque<u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Level {
+    Error,
+    Warning,
+    Info,
+    Debug,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LogLine {
+    /// Local `13:08:42`, empty when docker gave none
+    pub time: String,
+    pub text: String,
+    pub level: Level,
+    /// For order, as stdout's and stderr's lines are read apart
+    at: Option<jiff::Timestamp>,
+}
+
+impl LogLine {
+    /// A `docker logs --timestamps` line, made safe to draw
+    pub fn parse(raw: &[u8]) -> Self {
+        let stamped = raw.iter().position(|&b| b == b' ').and_then(|space| {
+            let at = std::str::from_utf8(&raw[..space])
+                .ok()?
+                .parse::<jiff::Timestamp>()
+                .ok()?;
+            Some((at, &raw[space + 1..]))
+        });
+        let (at, text) = match stamped {
+            Some((at, text)) => (Some(at), text),
+            None => (None, raw),
+        };
+        let time = at.map_or_else(String::new, |at| {
+            at.to_zoned(jiff::tz::TimeZone::system())
+                .strftime("%H:%M:%S")
+                .to_string()
+        });
+        let text = format::sanitize(text, MAX_LOG_LINE_BYTES);
+        let level = level(&text);
+        Self {
+            time,
+            text,
+            level,
+            at,
+        }
+    }
+}
+
+/// From words like `ERROR` or `level=warn`
+fn level(text: &str) -> Level {
+    for word in text.split(|c: char| !c.is_ascii_alphanumeric() && c != '=') {
+        let word = word.strip_prefix("level=").unwrap_or(word);
+        match word {
+            "ERROR" | "FATAL" | "PANIC" | "CRITICAL" | "error" | "fatal" | "panic" => {
+                return Level::Error;
+            }
+            "WARN" | "WARNING" | "warn" | "warning" => return Level::Warning,
+            "DEBUG" | "TRACE" | "debug" | "trace" => return Level::Debug,
+            _ => {}
+        }
+    }
+    Level::Info
+}
+
+pub struct Logs {
+    pub session: u64,
+    pub id: String,
+    pub name: String,
+    pub lines: VecDeque<LogLine>,
+    /// The line after the last one shown when scrolled, `None` while following
+    pub view: Option<usize>,
+    pub ended: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tone {
+    Info,
+    Good,
+    Warn,
+    Bad,
+}
+
+pub struct Toast {
+    pub text: String,
+    pub tone: Tone,
+    until: Instant,
+}
+
+/// Something docker should do, in the background
+#[derive(Clone, Debug, PartialEq)]
+pub enum Task {
+    Run {
+        args: Vec<String>,
+        /// The container and how it shows meanwhile
+        container: Option<(String, Pending)>,
+        done: String,
+    },
+    Prune(Vec<PruneTarget>),
+}
+
+pub struct Confirm {
+    pub title: String,
+    pub question: String,
+    /// The docker command it runs
+    pub command: String,
+    pub danger: bool,
+    task: Task,
+}
+
+pub struct PruneDialog {
+    pub cursor: usize,
+    pub chosen: [bool; 3],
+}
+
+pub enum Modal {
+    Help,
+    Confirm(Confirm),
+    Prune(PruneDialog),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Effect {
+    Start(Task),
+    OpenLogs { session: u64, id: String },
+    CloseLogs { session: u64 },
+    Refresh,
+    Quit,
+}
+
+#[derive(Default, Debug)]
+pub struct Snapshot {
+    pub containers: Vec<Container>,
+    pub images: Vec<Image>,
+    pub volumes: Vec<Volume>,
+}
+
+pub enum Action {
+    Key(KeyEvent),
+    Resize,
+    Snapshot(Result<Snapshot, String>),
+    Stats(Stats),
+    Log {
+        session: u64,
+        line: LogLine,
+    },
+    LogEnded {
+        session: u64,
+    },
+    Done {
+        task: Task,
+        result: Result<String, String>,
+    },
+}
+
+pub struct App {
+    pub theme: Theme,
+    pub view: View,
+    pub containers: Vec<Container>,
+    pub images: Vec<Image>,
+    pub volumes: Vec<Volume>,
+    pub stats: HashMap<String, Stats>,
+    pub history: HashMap<String, History>,
+    /// By container ID, and whether docker's done with it
+    pending: HashMap<String, (Pending, bool)>,
+    selected: [Option<String>; 3],
+    index: [usize; 3],
+    pub scroll: [usize; 3],
+    /// Rows the table shows, for page up and down
+    pub page: usize,
+    pub log_page: usize,
+    pub sort: [Sort; 3],
+    pub show_all: bool,
+    pub filter: [String; 3],
+    pub filtering: bool,
+    pub details: Details,
+    pub modal: Option<Modal>,
+    pub logs: Option<Logs>,
+    pub toast: Option<Toast>,
+    /// Why docker can't be reached
+    pub disconnected: Option<String>,
+    pub loaded: bool,
+    next_session: u64,
+    now: Instant,
+}
+
+impl App {
+    pub fn new(theme: Theme, now: Instant) -> Self {
+        Self {
+            theme,
+            view: View::Containers,
+            containers: Vec::new(),
+            images: Vec::new(),
+            volumes: Vec::new(),
+            stats: HashMap::new(),
+            history: HashMap::new(),
+            pending: HashMap::new(),
+            selected: [None, None, None],
+            index: [0; 3],
+            scroll: [0; 3],
+            page: 10,
+            log_page: 10,
+            sort: [
+                Sort {
+                    key: SortKey::Cpu,
+                    descending: true,
+                },
+                Sort {
+                    key: SortKey::Name,
+                    descending: false,
+                },
+                Sort {
+                    key: SortKey::Name,
+                    descending: false,
+                },
+            ],
+            show_all: true,
+            filter: [String::new(), String::new(), String::new()],
+            filtering: false,
+            details: Details::Bottom,
+            modal: None,
+            logs: None,
+            toast: None,
+            disconnected: None,
+            loaded: false,
+            next_session: 0,
+            now,
+        }
+    }
+
+    pub fn update(&mut self, action: Action, now: Instant) -> Vec<Effect> {
+        self.now = now;
+        match action {
+            Action::Key(key) => self.key(key),
+            Action::Resize => Vec::new(),
+            Action::Snapshot(snapshot) => self.snapshot(snapshot),
+            Action::Stats(stats) => {
+                self.add_stats(stats);
+                Vec::new()
+            }
+            Action::Log { session, line } => {
+                self.add_log_line(session, line);
+                Vec::new()
+            }
+            Action::LogEnded { session } => {
+                if let Some(logs) = self.logs.as_mut().filter(|logs| logs.session == session) {
+                    logs.ended = true;
+                }
+                Vec::new()
+            }
+            Action::Done { task, result } => {
+                if let Task::Run {
+                    container: Some((id, _)),
+                    ..
+                } = &task
+                    && let Some(pending) = self.pending.get_mut(id)
+                {
+                    pending.1 = true;
+                }
+                match result {
+                    Ok(message) => self.toast(message, Tone::Good),
+                    Err(message) => self.toast(message, Tone::Bad),
+                }
+                vec![Effect::Refresh]
+            }
+        }
+    }
+
+    /// Drops an old message, true when it did
+    pub fn expire(&mut self, now: Instant) -> bool {
+        self.now = now;
+        if self.toast.as_ref().is_some_and(|toast| now >= toast.until) {
+            self.toast = None;
+            return true;
+        }
+        false
+    }
+
+    // ---------------------------------------------------------------- what's shown
+
+    /// The view's rows, filtered and sorted, as indexes into its list
+    pub fn rows(&self, view: View) -> Vec<usize> {
+        let filter = self.filter[view.index()].to_lowercase();
+        let mut rows: Vec<usize> = match view {
+            View::Containers => (0..self.containers.len())
+                .filter(|&i| self.show_all || self.is_up(&self.containers[i]))
+                .collect(),
+            View::Images => (0..self.images.len()).collect(),
+            View::Volumes => (0..self.volumes.len()).collect(),
+        };
+        if !filter.is_empty() {
+            rows.retain(|&i| self.search_text(view, i).to_lowercase().contains(&filter));
+        }
+        let sort = self.sort[view.index()];
+        rows.sort_by(|&a, &b| {
+            let up_first = match view {
+                View::Containers => self
+                    .is_up(&self.containers[b])
+                    .cmp(&self.is_up(&self.containers[a])),
+                _ => std::cmp::Ordering::Equal,
+            };
+            let mut order = self.compare(view, sort.key, a, b);
+            if sort.descending {
+                order = order.reverse();
+            }
+            up_first
+                .then(order)
+                .then_with(|| self.key_of(view, a).cmp(&self.key_of(view, b)))
+        });
+        rows
+    }
+
+    fn compare(&self, view: View, key: SortKey, a: usize, b: usize) -> std::cmp::Ordering {
+        match (view, key) {
+            (View::Containers, SortKey::Cpu) => {
+                let cpu = |i: usize| {
+                    self.container_stats(&self.containers[i])
+                        .map_or(-1.0, |stats| stats.cpu)
+                };
+                cpu(a).total_cmp(&cpu(b))
+            }
+            (View::Containers, SortKey::Memory) => {
+                let memory = |i: usize| {
+                    self.container_stats(&self.containers[i])
+                        .map(|stats| stats.memory)
+                };
+                memory(a).cmp(&memory(b))
+            }
+            (View::Images, SortKey::Size) => {
+                self.images[a].size_bytes.cmp(&self.images[b].size_bytes)
+            }
+            (View::Images, SortKey::Created) => {
+                self.images[a].created_at.cmp(&self.images[b].created_at)
+            }
+            (View::Volumes, SortKey::Created) => {
+                self.volumes[a].created_at.cmp(&self.volumes[b].created_at)
+            }
+            _ => self.name_of(view, a).cmp(&self.name_of(view, b)),
+        }
+    }
+
+    fn name_of(&self, view: View, index: usize) -> String {
+        match view {
+            View::Containers => self.containers[index].name.clone(),
+            View::Images => self.images[index].reference(),
+            View::Volumes => self.volumes[index].name.clone(),
+        }
+    }
+
+    /// What the selection follows when the rows move
+    fn key_of(&self, view: View, index: usize) -> String {
+        match view {
+            View::Containers => self.containers[index].id.clone(),
+            View::Images => self.images[index].key(),
+            View::Volumes => self.volumes[index].name.clone(),
+        }
+    }
+
+    fn search_text(&self, view: View, index: usize) -> String {
+        match view {
+            View::Containers => {
+                let container = &self.containers[index];
+                format!(
+                    "{} {} {}",
+                    container.name,
+                    container.image,
+                    container.ports.join(" ")
+                )
+            }
+            View::Images => format!(
+                "{} {}",
+                self.images[index].reference(),
+                self.images[index].id
+            ),
+            View::Volumes => self.volumes[index].name.clone(),
+        }
+    }
+
+    /// The rows and the selected one's position among them, which follows the item when they move
+    pub fn selection(&mut self) -> (Vec<usize>, Option<usize>) {
+        let view = self.view;
+        let rows = self.rows(view);
+        let i = view.index();
+        let found = self.selected[i]
+            .as_ref()
+            .and_then(|key| rows.iter().position(|&row| &self.key_of(view, row) == key));
+        let position = found.or_else(|| {
+            rows.len()
+                .checked_sub(1)
+                .map(|last| self.index[i].min(last))
+        });
+        if let Some(position) = position {
+            self.index[i] = position;
+            self.selected[i] = Some(self.key_of(view, rows[position]));
+        }
+        (rows, position)
+    }
+
+    pub fn selected_container(&mut self) -> Option<&Container> {
+        if self.view != View::Containers {
+            return None;
+        }
+        let (rows, position) = self.selection();
+        position.map(|position| &self.containers[rows[position]])
+    }
+
+    fn move_selection(&mut self, to: Move) {
+        let view = self.view;
+        let (rows, position) = self.selection();
+        let Some(position) = position else { return };
+        let last = rows.len() - 1;
+        let target = match to {
+            Move::By(delta) => position.saturating_add_signed(delta).min(last),
+            Move::Top => 0,
+            Move::Bottom => last,
+        };
+        self.index[view.index()] = target;
+        self.selected[view.index()] = Some(self.key_of(view, rows[target]));
+    }
+
+    /// Running, paused or restarting, or about to change
+    pub fn is_up(&self, container: &Container) -> bool {
+        container.is_up() || self.pending.contains_key(&container.id)
+    }
+
+    pub fn pending(&self, container: &Container) -> Option<Pending> {
+        self.pending.get(&container.id).map(|(pending, _)| *pending)
+    }
+
+    /// Only for running containers, a stopped one keeps its last
+    pub fn container_stats(&self, container: &Container) -> Option<&Stats> {
+        (container.state == "running")
+            .then(|| self.stats.get(&container.id))
+            .flatten()
+    }
+
+    pub fn image_users(&self, image: &Image) -> Vec<&Container> {
+        self.containers
+            .iter()
+            .filter(|container| container.image_id == image.id)
+            .collect()
+    }
+
+    pub fn volume_users(&self, volume: &Volume) -> Vec<&Container> {
+        self.containers
+            .iter()
+            .filter(|container| {
+                container.mounts.iter().any(|mount| {
+                    mount.kind == "volume" && mount.name.as_deref() == Some(&volume.name)
+                })
+            })
+            .collect()
+    }
+
+    /// Stopped containers, dangling volumes and dangling images no container uses, as prune would find them
+    pub fn prunable(&self) -> [(usize, u64); 3] {
+        let containers = self
+            .containers
+            .iter()
+            .filter(|container| matches!(container.state.as_str(), "exited" | "created"))
+            .count();
+        let volumes = self
+            .volumes
+            .iter()
+            .filter(|volume| self.volume_users(volume).is_empty())
+            .count();
+        let dangling: Vec<&Image> = self
+            .images
+            .iter()
+            .filter(|image| image.is_dangling() && self.image_users(image).is_empty())
+            .collect();
+        let size = dangling.iter().map(|image| image.size_bytes).sum();
+        [(containers, 0), (volumes, 0), (dangling.len(), size)]
+    }
+
+    fn toast(&mut self, text: impl Into<String>, tone: Tone) {
+        self.toast = Some(Toast {
+            text: text.into(),
+            tone,
+            until: self.now + TOAST_TIME,
+        });
+    }
+
+    // ---------------------------------------------------------------- docker's updates
+
+    fn snapshot(&mut self, snapshot: Result<Snapshot, String>) -> Vec<Effect> {
+        let snapshot = match snapshot {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                self.disconnected = Some(error);
+                return Vec::new();
+            }
+        };
+        self.disconnected = None;
+        self.loaded = true;
+        self.containers = snapshot.containers;
+        self.images = snapshot.images;
+        self.volumes = snapshot.volumes;
+
+        let ids: Vec<&String> = self
+            .containers
+            .iter()
+            .map(|container| &container.id)
+            .collect();
+        self.stats.retain(|id, _| ids.contains(&id));
+        self.history.retain(|id, _| ids.contains(&id));
+        self.pending
+            .retain(|id, (_, done)| !*done && ids.contains(&id));
+
+        let mut effects = Vec::new();
+        if let Some(logs) = &self.logs
+            && let Some(container) = self
+                .containers
+                .iter()
+                .find(|container| container.id == logs.id)
+            && container.is_interactive()
+        {
+            let message = format!(
+                "{} is now interactive ({}), logs closed",
+                container.name,
+                container.interactive_flags()
+            );
+            effects.push(Effect::CloseLogs {
+                session: logs.session,
+            });
+            self.logs = None;
+            self.toast(message, Tone::Warn);
+        }
+        effects
+    }
+
+    fn add_stats(&mut self, stats: Stats) {
+        let history = self.history.entry(stats.id.clone()).or_default();
+        history.cpu.push_back(stats.cpu);
+        history.memory.push_back(stats.memory);
+        if history.cpu.len() > HISTORY {
+            history.cpu.pop_front();
+            history.memory.pop_front();
+        }
+        self.stats.insert(stats.id.clone(), stats);
+    }
+
+    fn add_log_line(&mut self, session: u64, line: LogLine) {
+        let Some(logs) = self.logs.as_mut().filter(|logs| logs.session == session) else {
+            return;
+        };
+        // After the last line that isn't later, looking back a little
+        let mut index = logs.lines.len();
+        if let Some(at) = line.at {
+            while index > 0
+                && logs.lines.len() - index < LOG_REORDER
+                && logs.lines[index - 1].at.is_some_and(|before| before > at)
+            {
+                index -= 1;
+            }
+        }
+        logs.lines.insert(index, line);
+        if let Some(view) = logs.view.as_mut().filter(|view| index < **view) {
+            *view += 1;
+        }
+        if logs.lines.len() > MAX_LOG_LINES {
+            logs.lines.pop_front();
+            if let Some(view) = logs.view.as_mut() {
+                *view = view.saturating_sub(1).max(1);
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- keys
+
+    fn key(&mut self, key: KeyEvent) -> Vec<Effect> {
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+            return vec![Effect::Quit];
+        }
+        if self.modal.is_some() {
+            return self.modal_key(key);
+        }
+        if self.filtering {
+            self.filter_key(key);
+            return Vec::new();
+        }
+        if self.logs.is_some() {
+            return self.logs_key(key);
+        }
+        self.main_key(key)
+    }
+
+    fn main_key(&mut self, key: KeyEvent) -> Vec<Effect> {
+        match key.code {
+            KeyCode::Down | KeyCode::Char('j') => self.move_selection(Move::By(1)),
+            KeyCode::Up | KeyCode::Char('k') => self.move_selection(Move::By(-1)),
+            KeyCode::PageDown => self.move_selection(Move::By(page(self.page))),
+            KeyCode::PageUp => self.move_selection(Move::By(-page(self.page))),
+            KeyCode::Home | KeyCode::Char('g') => self.move_selection(Move::Top),
+            KeyCode::End | KeyCode::Char('G') => self.move_selection(Move::Bottom),
+            KeyCode::Tab | KeyCode::Right => self.switch_view(1),
+            KeyCode::BackTab | KeyCode::Left => self.switch_view(2),
+            KeyCode::Char(c @ '1'..='3') => self.view = View::ALL[usize::from(c as u8 - b'1')],
+            KeyCode::Char('/') => self.filtering = true,
+            KeyCode::Esc => self.filter[self.view.index()].clear(),
+            KeyCode::Char('a') if self.view == View::Containers => {
+                self.show_all = !self.show_all;
+                let shown = if self.show_all {
+                    "showing all containers"
+                } else {
+                    "showing running containers"
+                };
+                self.toast(shown, Tone::Info);
+            }
+            KeyCode::Char('i') => {
+                self.details = self.details.next();
+                self.toast(format!("details: {}", self.details.label()), Tone::Info);
+            }
+            KeyCode::Char('p') => {
+                self.modal = Some(Modal::Prune(PruneDialog {
+                    cursor: 0,
+                    chosen: [true; 3],
+                }));
+            }
+            KeyCode::Char('?') => self.modal = Some(Modal::Help),
+            KeyCode::Char('q') => return vec![Effect::Quit],
+            KeyCode::Char('s') => return self.start_or_stop(),
+            KeyCode::Char('r') => self.restart(),
+            KeyCode::Char('d') | KeyCode::Delete => self.remove(),
+            KeyCode::Char('l') | KeyCode::Enter => return self.open_logs(),
+            KeyCode::Char(c) => {
+                if let Some(key) = SortKey::from_key(c) {
+                    self.sort_by(key);
+                }
+            }
+            _ => {}
+        }
+        Vec::new()
+    }
+
+    fn switch_view(&mut self, by: usize) {
+        self.view = View::ALL[(self.view.index() + by) % View::ALL.len()];
+    }
+
+    fn sort_by(&mut self, key: SortKey) {
+        let view = self.view;
+        if !view.sort_keys().contains(&key) {
+            let message = format!(
+                "{} can't be sorted by {}",
+                view.title().to_lowercase(),
+                key.label()
+            );
+            self.toast(message, Tone::Info);
+            return;
+        }
+        let sort = &mut self.sort[view.index()];
+        if sort.key == key {
+            sort.descending = !sort.descending;
+        } else {
+            *sort = Sort {
+                key,
+                descending: key != SortKey::Name,
+            };
+        }
+    }
+
+    fn start_or_stop(&mut self) -> Vec<Effect> {
+        let Some(container) = self.selected_container().cloned() else {
+            return Vec::new();
+        };
+        if self.pending.contains_key(&container.id) {
+            return Vec::new();
+        }
+        let name = &container.name;
+        if container.is_up() {
+            self.confirm(
+                "Stop",
+                format!("Stop container {name}?"),
+                false,
+                run(
+                    &["stop", name],
+                    Some((&container.id, Pending::Stopping)),
+                    format!("stopped {name}"),
+                ),
+            );
+            return Vec::new();
+        }
+        self.start(run(
+            &["start", name],
+            Some((&container.id, Pending::Starting)),
+            format!("started {name}"),
+        ))
+    }
+
+    fn restart(&mut self) {
+        let Some(container) = self.selected_container().cloned() else {
+            return;
+        };
+        if self.pending.contains_key(&container.id) {
+            return;
+        }
+        let name = &container.name;
+        self.confirm(
+            "Restart",
+            format!("Restart container {name}?"),
+            false,
+            run(
+                &["restart", name],
+                Some((&container.id, Pending::Restarting)),
+                format!("restarted {name}"),
+            ),
+        );
+    }
+
+    fn remove(&mut self) {
+        let (rows, Some(position)) = self.selection() else {
+            return;
+        };
+        let row = rows[position];
+        match self.view {
+            View::Containers => {
+                let container = self.containers[row].clone();
+                if self.pending.contains_key(&container.id) {
+                    return;
+                }
+                let name = &container.name;
+                let (title, args): (&str, &[&str]) = if container.is_up() {
+                    ("Force remove", &["rm", "-f", "-v"])
+                } else {
+                    ("Remove", &["rm", "-v"])
+                };
+                let mut args = args.to_vec();
+                args.push(name);
+                self.confirm(
+                    title,
+                    format!("{title} container {name}?"),
+                    true,
+                    run(
+                        &args,
+                        Some((&container.id, Pending::Removing)),
+                        format!("removed {name}"),
+                    ),
+                );
+            }
+            View::Images => {
+                let image = self.images[row].clone();
+                let users = self.image_users(&image).len();
+                if users > 0 {
+                    self.toast(
+                        format!(
+                            "{} is used by {}",
+                            image.reference(),
+                            format::plural(users, "container")
+                        ),
+                        Tone::Bad,
+                    );
+                    return;
+                }
+                let target = image.removal_target();
+                self.confirm(
+                    "Remove image",
+                    format!("Remove {} ({})?", image.reference(), image.size),
+                    true,
+                    run(
+                        &["rmi", &target],
+                        None,
+                        format!("removed image {}", image.reference()),
+                    ),
+                );
+            }
+            View::Volumes => {
+                let volume = self.volumes[row].clone();
+                let name = format::short_volume(&volume.name).to_string();
+                let users = self.volume_users(&volume).len();
+                if users > 0 {
+                    self.toast(
+                        format!("{name} is used by {}", format::plural(users, "container")),
+                        Tone::Bad,
+                    );
+                    return;
+                }
+                self.confirm(
+                    "Remove volume",
+                    format!("Remove volume {name}?"),
+                    true,
+                    run(
+                        &["volume", "rm", &volume.name],
+                        None,
+                        format!("removed volume {name}"),
+                    ),
+                );
+            }
+        }
+    }
+
+    fn confirm(&mut self, title: &str, question: String, danger: bool, task: Task) {
+        let Task::Run { args, .. } = &task else {
+            return;
+        };
+        self.modal = Some(Modal::Confirm(Confirm {
+            title: title.to_string(),
+            question,
+            command: format!("docker {}", args.join(" ")),
+            danger,
+            task,
+        }));
+    }
+
+    fn start(&mut self, task: Task) -> Vec<Effect> {
+        if let Task::Run {
+            container: Some((id, pending)),
+            ..
+        } = &task
+        {
+            self.pending.insert(id.clone(), (*pending, false));
+        }
+        vec![Effect::Start(task)]
+    }
+
+    fn open_logs(&mut self) -> Vec<Effect> {
+        let Some(container) = self.selected_container().cloned() else {
+            return Vec::new();
+        };
+        if container.is_interactive() {
+            let message = format!(
+                "{} is interactive ({}), logs are not shown",
+                container.name,
+                container.interactive_flags()
+            );
+            self.toast(message, Tone::Warn);
+            return Vec::new();
+        }
+        self.next_session += 1;
+        let session = self.next_session;
+        self.logs = Some(Logs {
+            session,
+            id: container.id.clone(),
+            name: container.name.clone(),
+            lines: VecDeque::new(),
+            view: None,
+            ended: false,
+        });
+        vec![Effect::OpenLogs {
+            session,
+            id: container.id,
+        }]
+    }
+
+    fn logs_key(&mut self, key: KeyEvent) -> Vec<Effect> {
+        let rows = self.log_page.max(1);
+        let Some(logs) = self.logs.as_mut() else {
+            return Vec::new();
+        };
+        let length = logs.lines.len();
+        let top = rows.min(length);
+        let scroll = |view: Option<usize>, by: isize| -> Option<usize> {
+            let at = view.unwrap_or(length).saturating_add_signed(by).max(top);
+            (at < length).then_some(at)
+        };
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q' | 'l') => {
+                let session = logs.session;
+                self.logs = None;
+                return vec![Effect::CloseLogs { session }];
+            }
+            KeyCode::Char(' ') => {
+                logs.view = if logs.view.is_none() {
+                    Some(length)
+                } else {
+                    None
+                }
+            }
+            KeyCode::Up | KeyCode::Char('k') => logs.view = scroll(logs.view, -1).or(Some(top)),
+            KeyCode::PageUp => logs.view = scroll(logs.view, -page(rows)).or(Some(top)),
+            KeyCode::Down | KeyCode::Char('j') if logs.view.is_some() => {
+                logs.view = scroll(logs.view, 1);
+            }
+            KeyCode::PageDown if logs.view.is_some() => logs.view = scroll(logs.view, page(rows)),
+            KeyCode::Home | KeyCode::Char('g') => logs.view = Some(top),
+            KeyCode::End | KeyCode::Char('G') => logs.view = None,
+            _ => {}
+        }
+        Vec::new()
+    }
+
+    fn filter_key(&mut self, key: KeyEvent) {
+        let filter = &mut self.filter[self.view.index()];
+        match key.code {
+            KeyCode::Enter => self.filtering = false,
+            KeyCode::Esc => {
+                filter.clear();
+                self.filtering = false;
+            }
+            KeyCode::Backspace => {
+                filter.pop();
+            }
+            KeyCode::Down => self.move_selection(Move::By(1)),
+            KeyCode::Up => self.move_selection(Move::By(-1)),
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => filter.push(c),
+            _ => {}
+        }
+    }
+
+    fn modal_key(&mut self, key: KeyEvent) -> Vec<Effect> {
+        let Some(modal) = self.modal.take() else {
+            return Vec::new();
+        };
+        match modal {
+            Modal::Help => {}
+            Modal::Confirm(confirm) => match key.code {
+                KeyCode::Char('y' | 'Y') => return self.start(confirm.task),
+                KeyCode::Char('n' | 'N' | 'q') | KeyCode::Esc | KeyCode::Enter => {}
+                _ => self.modal = Some(Modal::Confirm(confirm)),
+            },
+            Modal::Prune(mut dialog) => match key.code {
+                KeyCode::Down | KeyCode::Char('j') => {
+                    dialog.cursor = (dialog.cursor + 1) % 3;
+                    self.modal = Some(Modal::Prune(dialog));
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    dialog.cursor = (dialog.cursor + 2) % 3;
+                    self.modal = Some(Modal::Prune(dialog));
+                }
+                KeyCode::Char(' ') => {
+                    dialog.chosen[dialog.cursor] = !dialog.chosen[dialog.cursor];
+                    self.modal = Some(Modal::Prune(dialog));
+                }
+                KeyCode::Enter => {
+                    let targets: Vec<PruneTarget> = PruneTarget::ORDER
+                        .into_iter()
+                        .zip(dialog.chosen)
+                        .filter_map(|(target, chosen)| chosen.then_some(target))
+                        .collect();
+                    if targets.is_empty() {
+                        return Vec::new();
+                    }
+                    self.toast("pruning…", Tone::Info);
+                    return vec![Effect::Start(Task::Prune(targets))];
+                }
+                KeyCode::Esc | KeyCode::Char('q' | 'p') => {}
+                _ => self.modal = Some(Modal::Prune(dialog)),
+            },
+        }
+        Vec::new()
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Move {
+    By(isize),
+    Top,
+    Bottom,
+}
+
+fn page(rows: usize) -> isize {
+    isize::try_from(rows.max(1)).unwrap_or(1)
+}
+
+fn run(args: &[&str], container: Option<(&String, Pending)>, done: String) -> Task {
+    Task::Run {
+        args: args.iter().map(ToString::to_string).collect(),
+        container: container.map(|(id, pending)| (id.clone(), pending)),
+        done,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dashboard::sample;
+
+    fn press(app: &mut App, keys: &str) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        for c in keys.chars() {
+            let code = match c {
+                '↓' => KeyCode::Down,
+                '↑' => KeyCode::Up,
+                '⏎' => KeyCode::Enter,
+                '⎋' => KeyCode::Esc,
+                '⇥' => KeyCode::Tab,
+                c => KeyCode::Char(c),
+            };
+            effects.extend(app.update(Action::Key(KeyEvent::from(code)), Instant::now()));
+        }
+        effects
+    }
+
+    fn selected_name(app: &mut App) -> String {
+        let (rows, position) = app.selection();
+        app.name_of(app.view, rows[position.unwrap()])
+    }
+
+    #[test]
+    fn sorts_running_containers_first_by_cpu() {
+        let mut app = sample::app();
+        let names: Vec<&str> = app
+            .rows(View::Containers)
+            .iter()
+            .map(|&i| app.containers[i].name.as_str())
+            .collect();
+        assert_eq!(names, ["api", "db", "web", "console", "worker"]);
+        press(&mut app, "N");
+        let names: Vec<&str> = app
+            .rows(View::Containers)
+            .iter()
+            .map(|&i| app.containers[i].name.as_str())
+            .collect();
+        assert_eq!(names, ["api", "console", "db", "web", "worker"]);
+        press(&mut app, "N");
+        assert_eq!(
+            app.sort[0],
+            Sort {
+                key: SortKey::Name,
+                descending: true
+            }
+        );
+        press(&mut app, "S");
+        assert_eq!(
+            app.toast.as_ref().unwrap().text,
+            "containers can't be sorted by size"
+        );
+    }
+
+    #[test]
+    fn selection_follows_the_item_when_rows_move() {
+        let mut app = sample::app();
+        press(&mut app, "j");
+        assert_eq!(selected_name(&mut app), "db");
+        // db overtakes api
+        let db = app
+            .containers
+            .iter()
+            .find(|c| c.name == "db")
+            .unwrap()
+            .id
+            .clone();
+        app.update(
+            Action::Stats(Stats {
+                id: db,
+                cpu: 99.0,
+                ..Stats::default()
+            }),
+            Instant::now(),
+        );
+        assert_eq!(app.rows(View::Containers)[0], 1);
+        assert_eq!(selected_name(&mut app), "db");
+        press(&mut app, "G");
+        assert_eq!(selected_name(&mut app), "worker");
+    }
+
+    #[test]
+    fn filters_and_hides_stopped_containers() {
+        let mut app = sample::app();
+        press(&mut app, "/post");
+        assert!(app.filtering);
+        assert_eq!(app.rows(View::Containers).len(), 1);
+        press(&mut app, "⏎");
+        assert!(!app.filtering);
+        press(&mut app, "⎋a");
+        assert_eq!(app.rows(View::Containers).len(), 4);
+        press(&mut app, "⇥");
+        assert_eq!(app.view, View::Images);
+    }
+
+    #[test]
+    fn stops_after_confirming() {
+        let mut app = sample::app();
+        assert_eq!(press(&mut app, "s"), []);
+        assert!(matches!(app.modal, Some(Modal::Confirm(ref c)) if c.command == "docker stop api"));
+        let effects = press(&mut app, "y");
+        let [Effect::Start(Task::Run { args, .. })] = &effects[..] else {
+            panic!("{effects:?}");
+        };
+        assert_eq!(args, &["stop", "api"]);
+        let api = app.containers[0].clone();
+        assert_eq!(app.pending(&api), Some(Pending::Stopping));
+        // Pressing again does nothing until docker answers
+        assert_eq!(press(&mut app, "s"), []);
+        assert!(app.modal.is_none());
+
+        let task = Task::Run {
+            args: vec![],
+            container: Some((api.id.clone(), Pending::Stopping)),
+            done: String::new(),
+        };
+        let effects = app.update(
+            Action::Done {
+                task,
+                result: Ok("stopped api".into()),
+            },
+            Instant::now(),
+        );
+        assert_eq!(effects, [Effect::Refresh]);
+        assert_eq!(app.pending(&api), Some(Pending::Stopping));
+        app.update(Action::Snapshot(Ok(sample::snapshot())), Instant::now());
+        assert_eq!(app.pending(&api), None);
+    }
+
+    #[test]
+    fn removes_unused_images_only() {
+        let mut app = sample::app();
+        press(&mut app, "2");
+        assert_eq!(selected_name(&mut app), "<none>");
+        press(&mut app, "d");
+        assert!(
+            matches!(app.modal, Some(Modal::Confirm(ref c)) if c.command == "docker rmi 0123456789ab")
+        );
+        press(&mut app, "n");
+        press(&mut app, "jd");
+        assert_eq!(
+            app.toast.as_ref().unwrap().text,
+            "acme/api:dev is used by 2 containers"
+        );
+        assert!(app.modal.is_none());
+    }
+
+    #[test]
+    fn no_logs_for_interactive_containers() {
+        let mut app = sample::app();
+        press(&mut app, "N");
+        press(&mut app, "j");
+        assert_eq!(selected_name(&mut app), "console");
+        assert_eq!(press(&mut app, "l"), []);
+        assert!(app.logs.is_none());
+        assert_eq!(
+            app.toast.as_ref().unwrap().text,
+            "console is interactive (-it), logs are not shown"
+        );
+
+        press(&mut app, "k");
+        let effects = press(&mut app, "l");
+        assert!(matches!(
+            &effects[..],
+            [Effect::OpenLogs { session: 1, .. }]
+        ));
+        // It's recreated as interactive
+        let mut snapshot = sample::snapshot();
+        snapshot.containers[0].tty = true;
+        let effects = app.update(Action::Snapshot(Ok(snapshot)), Instant::now());
+        assert_eq!(effects, [Effect::CloseLogs { session: 1 }]);
+        assert!(app.logs.is_none());
+    }
+
+    #[test]
+    fn logs_follow_and_scroll() {
+        let mut app = sample::app();
+        app.log_page = 3;
+        press(&mut app, "l");
+        for i in 0..10 {
+            let line = LogLine::parse(format!("2026-11-06T13:08:{i:02}Z line {i}").as_bytes());
+            app.update(Action::Log { session: 1, line }, Instant::now());
+        }
+        app.update(
+            Action::Log {
+                session: 2,
+                line: LogLine::parse(b"other"),
+            },
+            Instant::now(),
+        );
+        let logs = app.logs.as_ref().unwrap();
+        assert_eq!(logs.lines.len(), 10);
+        assert_eq!(logs.view, None);
+        press(&mut app, "kk");
+        assert_eq!(app.logs.as_ref().unwrap().view, Some(8));
+        press(&mut app, "g");
+        assert_eq!(app.logs.as_ref().unwrap().view, Some(3));
+        press(&mut app, "G ");
+        assert_eq!(app.logs.as_ref().unwrap().view, Some(10));
+        assert_eq!(press(&mut app, "⎋"), [Effect::CloseLogs { session: 1 }]);
+    }
+
+    #[test]
+    fn prunes_the_chosen_targets() {
+        let mut app = sample::app();
+        press(&mut app, "p");
+        press(&mut app, "j ");
+        assert_eq!(
+            press(&mut app, "⏎"),
+            [Effect::Start(Task::Prune(vec![
+                PruneTarget::Containers,
+                PruneTarget::Images
+            ]))]
+        );
+        assert_eq!(app.prunable(), [(1, 0), (1, 0), (1, 412_000_000)]);
+        // Docker won't remove a dangling image a container uses
+        let dangling = app
+            .images
+            .iter()
+            .find(|image| image.is_dangling())
+            .unwrap()
+            .id
+            .clone();
+        app.containers[0].image_id = dangling;
+        assert_eq!(app.prunable()[2], (0, 0));
+    }
+
+    #[test]
+    fn orders_log_lines_by_time() {
+        let mut app = sample::app();
+        press(&mut app, "l");
+        for raw in [
+            "2026-11-06T13:00:01Z a",
+            "2026-11-06T13:00:03Z c",
+            "2026-11-06T13:00:02Z b",
+            "no time",
+        ] {
+            app.update(
+                Action::Log {
+                    session: 1,
+                    line: LogLine::parse(raw.as_bytes()),
+                },
+                Instant::now(),
+            );
+        }
+        let texts: Vec<&str> = app
+            .logs
+            .as_ref()
+            .unwrap()
+            .lines
+            .iter()
+            .map(|line| line.text.as_str())
+            .collect();
+        assert_eq!(texts, ["a", "b", "c", "no time"]);
+    }
+
+    #[test]
+    fn log_lines() {
+        let line = LogLine::parse(b"2026-11-06T13:08:42.123456789Z \x1b[31mERROR\x1b[0m boom\r");
+        assert_eq!(line.text, "ERROR boom");
+        assert_eq!(line.level, Level::Error);
+        assert_eq!(line.time.len(), 8);
+        let line = LogLine::parse(b"no timestamp level=warn");
+        assert_eq!(
+            (line.time.as_str(), line.text.as_str(), line.level),
+            ("", "no timestamp level=warn", Level::Warning)
+        );
+        assert_eq!(LogLine::parse(b"0 errors").level, Level::Info);
+    }
+
+    #[test]
+    fn disconnects_and_reconnects() {
+        let mut app = sample::app();
+        app.update(
+            Action::Snapshot(Err("Cannot connect to the Docker daemon".into())),
+            Instant::now(),
+        );
+        assert!(app.disconnected.is_some());
+        assert_eq!(app.containers.len(), 5);
+        app.update(Action::Snapshot(Ok(sample::snapshot())), Instant::now());
+        assert!(app.disconnected.is_none());
+    }
+}

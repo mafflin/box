@@ -1,0 +1,47 @@
+#!/bin/bash
+
+# Bash completion for box: the command, then its targets, options when the word starts with -
+_box() {
+  local current="${COMP_WORDS[COMP_CWORD]}"
+  local word index extended=""
+  local -a words=() candidates=() options=(-h --help)
+
+  # The command and targets before the cursor, nothing after --help since it exits
+  for (( index = 1; index < COMP_CWORD; index++ )); do
+    word="${COMP_WORDS[index]}"
+    case "${word}" in
+      -h|--help) return 0 ;;
+      -x|--extended) extended=1 ;;
+      -*) ;;
+      *) words+=("${word}") ;;
+    esac
+  done
+
+  case "${words[0]}" in
+    "")
+      candidates=(list prune stop)
+      ;;
+    list)
+      if (( ${#words[@]} == 1 )); then
+        candidates=(containers images volumes)
+        [[ -n "${extended}" ]] && candidates=(containers)
+      fi
+      [[ -z "${extended}" && "${words[1]:-containers}" == containers ]] && options+=(-x --extended)
+      ;;
+    prune)
+      if (( ${#words[@]} == 1 )); then
+        candidates=(containers images volumes all)
+      elif [[ " ${words[*]} " != *" all "* ]]; then
+        for word in containers images volumes; do
+          [[ " ${words[*]} " == *" ${word} "* ]] || candidates+=("${word}")
+        done
+      fi
+      ;;
+  esac
+
+  [[ "${current}" == -* ]] && candidates=("${options[@]}")
+  COMPREPLY=( $(compgen -W "${candidates[*]}" -- "${current}") )
+  return 0
+}
+
+complete -F _box box

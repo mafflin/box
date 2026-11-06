@@ -1,0 +1,16 @@
+---
+source: src/dashboard/ui/mod.rs
+expression: screen
+---
+  Containers 5   Images 5   Volumes 4                  sort cpu ▼   showing all
+╭─ logs · api ─────────────────────────────────────────────────── ● following ─╮
+│ 13:08:00  GET / 200                                                          │
+│ 13:08:01  WARN slow query                                                    │
+│ 13:08:02  ERROR timeout                                                      │
+│ 13:08:03  cleared                                                            │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ esc back  space pause  ↑↓ scroll  g G top / end
