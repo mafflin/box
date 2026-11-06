@@ -17,5 +17,5 @@ pub const MOUNTS: Color = Color::Reset;
 pub const SIZE: Color = Color::Blue;
 pub const CREATED: Color = Color::Yellow;
 pub const DRIVER: Color = Color::Cyan;
-/// In `box list`, the dashboard shows the text color, dimmed for none
+/// The dashboard dims it for none
 pub const COUNT: Color = Color::Magenta;

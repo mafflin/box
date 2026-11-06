@@ -361,7 +361,7 @@ fn volumes(app: &App, rows: &[usize]) -> (Vec<Column>, Vec<bool>) {
 fn count_cell(theme: &Theme, count: usize) -> (String, Style) {
     (
         count.to_string(),
-        fg(if count == 0 { theme.dim } else { theme.text }),
+        fg(if count == 0 { theme.dim } else { colors::COUNT }),
     )
 }
 

@@ -215,6 +215,7 @@ mod tests {
     use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
     use super::*;
+    use crate::colors;
     use crate::dashboard::app::{Action, LogLine};
     use crate::dashboard::sample;
 
@@ -270,6 +271,27 @@ mod tests {
         assert_eq!(buffer[(3, 4)].bg, theme.bg_alt);
         assert!(!buffer[(3, 3)].modifier.contains(Modifier::BOLD));
         assert_eq!(buffer[(3, 7)].fg, theme.dim);
+
+        // How many containers use a volume, dimmed for none
+        press(&mut app, "3");
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let count = |name: &str| {
+            let area = buffer.area;
+            let y = (0..area.height)
+                .find(|&y| {
+                    let line: String = (0..area.width).map(|x| buffer[(x, y)].symbol()).collect();
+                    line.contains(name)
+                })
+                .unwrap();
+            let x = (0..area.width)
+                .rev()
+                .find(|&x| buffer[(x, y)].symbol().chars().all(|c| c.is_ascii_digit()))
+                .unwrap();
+            buffer[(x, y)].fg
+        };
+        assert_eq!(count("pgdata"), colors::COUNT);
+        assert_eq!(count("old-data"), theme.dim);
     }
 
     #[test]
