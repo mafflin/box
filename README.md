@@ -23,7 +23,7 @@ box stop                              # every running container
 
 | Key | Does |
 |---|---|
-| `↑↓` `j k` `g G` PgUp/PgDn | move |
+| `↑↓` `j k` `g G` PgUp/PgDn, mouse wheel | move |
 | `tab` `1 2 3` `← →` | containers, images, volumes |
 | `/` | filter, `enter` keeps it, `esc` clears it |
 | `P M N S T` | sort by CPU, memory, name, size, created, again to reverse |
