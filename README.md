@@ -1,51 +1,53 @@
 # box
 
-A small docker helper: `box` opens a live dashboard of containers, images and volumes, and `box list`, `box prune` and `box stop` work from the command line. Everything goes through the `docker` command, so docker contexts and `DOCKER_HOST` work as they do for docker.
+A docker helper: a live dashboard of containers, images and volumes, plus `list`, `prune` and `stop` commands. It runs the `docker` CLI, so contexts and `DOCKER_HOST` apply.
 
 ## Install
 
 ```sh
-rake install   # builds target/release/box, links it into ~/.local/bin and the bash completion into ~/.completions
+cargo install --locked --path .                 # into ~/.cargo/bin
+stow -d completions -t ~/.completions bash      # bash completion
+stow -d completions -t ~/.zsh/completions zsh   # zsh completion
 ```
 
-The links point into this repo, so `rake install` again after pulling updates them.
+stow needs the target directories to exist. For zsh, add `fpath=(~/.zsh/completions $fpath)` before `compinit`.
 
 ## Commands
 
 ```sh
-box                                   # the dashboard; prints the help when output isn't a terminal
-box list containers|images|volumes    # -x / --extended adds IPs and mounts to containers
-box prune containers|images|volumes|all ...   # containers first, then volumes, then images
-box stop                              # every running container
+box                                       # dashboard (help when not in a terminal)
+box list containers|images|volumes        # containers -x: IPs and mounts too
+box prune containers|images|volumes|all   # containers first, then volumes, then images
+box stop                                  # all running containers
 ```
 
 ## Dashboard
 
-| Key | Does |
+| Key | Action |
 |---|---|
-| `↑↓` `j k` `g G` PgUp/PgDn, mouse wheel | move |
-| `tab` `1 2 3` `← →` | containers, images, volumes |
-| `/` | filter, `enter` keeps it, `esc` clears it |
-| `P M N S T` | sort by CPU, memory, name, size, created, again to reverse |
-| `a` | running containers only, or all |
-| `i` | details below, beside, or none |
-| `s` `r` `d` | stop or start, restart, remove, after `y` |
-| `l` `enter` | follow the container's logs, `space` pauses |
-| `p` | prune stopped containers, dangling volumes and dangling images |
+| `↑↓` `jk` `gG` PgUp/PgDn, wheel | move |
+| `tab` `123` `←→` | switch view |
+| `/` | filter (`enter` keep, `esc` clear) |
+| `P M N S T` | sort: CPU, memory, name, size, created (again reverses) |
+| `a` | running / all containers |
+| `i` | details: below, beside, off |
+| `s` `r` `d` | start/stop, restart, remove (confirm with `y`) |
+| `l` `enter` | follow logs (`space` pauses) |
+| `p` | prune stopped containers and dangling volumes and images |
 | `?` `q` | help, quit |
 
-Containers run with `-t` or `-i` have no logs view, as their output is a terminal session. Log lines are shown without escape sequences or control characters, so a container can't change the terminal.
+Containers started with `-t` or `-i` have no logs view, since their output is a terminal session. Log lines are stripped of escape sequences and control characters, so a container can't change your terminal.
 
 ## Settings
 
-`~/.config/box/settings.yml` (`$XDG_CONFIG_HOME/box/` if set) is optional and only the dashboard reads it. Unknown keys are an error.
+Optional: `~/.config/box/settings.yml` (or under `$XDG_CONFIG_HOME`).
 
 ```yaml
-accent: yellow # optional: yellow, red, green, blue, magenta or cyan
+accent: yellow   # yellow, red, green, blue, magenta or cyan
 ```
 
-The colors are the terminal's ANSI ones, so its theme decides how they look; the dashboard's backgrounds are grays 236–239 of the 256 and assume a dark terminal.
+Colors are the terminal's ANSI ones, so its theme decides them. Backgrounds are grays 236–239 of the 256-color palette and assume a dark terminal.
 
 ## Tests
 
-`rake` runs rubocop, `cargo fmt --check`, clippy and the unit tests, then the Ruby tests in `test/`: the completion's, and the command line's against the debug build with a fake `docker`. The dashboard's screens are [insta](https://insta.rs) snapshots in `src/dashboard/ui/snapshots/`; after changing what it draws, review them with `INSTA_UPDATE=always cargo test` and `git diff`.
+`rake` runs rubocop, rustfmt, clippy, the unit tests and the Ruby tests in `test/`: both completions' (zsh's are skipped without zsh), and the debug build's against a fake `docker`. Dashboard screens are [insta](https://insta.rs) snapshots in `src/dashboard/ui/snapshots/`: after changing the UI, run `INSTA_UPDATE=always cargo test` and review with `git diff`.

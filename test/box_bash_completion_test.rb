@@ -2,8 +2,8 @@
 
 require_relative 'test_helper'
 
-class BoxCompletionTest < Minitest::Test
-  COMPLETION = File.join(ROOT, 'completions', '_box')
+class BoxBashCompletionTest < Minitest::Test
+  COMPLETION = File.join(ROOT, 'completions', 'bash', '_box')
 
   # Sources the completion, completes the last word and prints the candidates
   SCRIPT = <<~'BASH'

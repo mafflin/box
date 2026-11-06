@@ -1,0 +1,68 @@
+#compdef box
+
+# Zsh completion for box: the command, then its targets, options when the word starts with -
+local word extended=0
+local -a given candidates options
+options=(
+  '-h:Print help'
+  '--help:Print help'
+)
+
+# The command and targets before the cursor, nothing after --help since it exits
+for word in "${(@)words[2,CURRENT-1]}"; do
+  case $word in
+    -h|--help) return 1 ;;
+    -x|--extended) extended=1 ;;
+    -*) ;;
+    *) given+=("$word") ;;
+  esac
+done
+
+case ${given[1]} in
+  '')
+    candidates=(
+      'list:Print containers, images or volumes as a table'
+      'prune:Remove stopped containers, dangling images or dangling volumes'
+      'stop:Stop all running containers'
+    )
+    ;;
+  list)
+    if (( $#given == 1 )); then
+      candidates=('containers:Running containers')
+      (( extended )) || candidates+=(
+        'images:Images and how many containers use them'
+        'volumes:Volumes and how many containers use them'
+      )
+    fi
+    if (( ! extended )) && [[ ${given[2]:-containers} == containers ]]; then
+      options+=(
+        '-x:Show containers with their IPs and mounts'
+        '--extended:Show containers with their IPs and mounts'
+      )
+    fi
+    ;;
+  prune)
+    if (( $#given == 1 )); then
+      candidates=(
+        'containers:Stopped containers'
+        'images:Dangling images'
+        'volumes:Dangling volumes'
+        'all:All of them'
+      )
+    elif (( ! ${given[(Ie)all]} )); then
+      (( ${given[(Ie)containers]} )) || candidates+=('containers:Stopped containers')
+      (( ${given[(Ie)images]} )) || candidates+=('images:Dangling images')
+      (( ${given[(Ie)volumes]} )) || candidates+=('volumes:Dangling volumes')
+    fi
+    ;;
+esac
+
+if [[ ${words[CURRENT]} == -* ]]; then
+  _describe -t options option options
+elif (( ! $#given )); then
+  _describe -t commands command candidates
+elif (( $#candidates )); then
+  _describe -t targets target candidates
+else
+  return 1
+fi
