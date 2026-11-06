@@ -2,27 +2,27 @@
 source: src/dashboard/ui/mod.rs
 expression: screen
 ---
-  Containers 5   Images 5   Volumes 4                                                                       sort name ▲
+  Containers 5   Images 6   Volumes 4                                                                       sort name ▲
 ╭─ Images ─────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ IMAGE ▲            ID              SIZE      CREATED  CONTAINERS                                                     │
-│ <none>             0123456789ab   412MB   2 days ago           0                                                     │
-│ acme/api:dev       aaaaaaaaaaaa  1.21GB  3 hours ago           2                                                     │
-│ nginx:1.27-alpine  cccccccccccc  48.2MB  12 days ago           1                                                     │
-│ postgres:16        bbbbbbbbbbbb   438MB  2 weeks ago           1                                                     │
-│ ruby:3.3-slim      dddddddddddd   216MB  3 weeks ago           1                                                     │
+│ IMAGE ▲            ID            PLATFORM       SIZE      CREATED  CONTAINERS                                        │
+│ <none>             0123456789ab                412MB   2 days ago           0                                        │
+│ acme/api:dev       aaaaaaaaaaaa               1.21GB  3 hours ago           2                                        │
+│ acme/api:latest    aaaaaaaaaaaa               1.21GB  3 hours ago           2                                        │
+│ nginx:1.27-alpine  cccccccccccc               48.2MB  12 days ago           1                                        │
+│ postgres:16        bbbbbbbbbbbb  linux/amd64   438MB  2 weeks ago           1                                        │
+│ ruby:3.3-slim      dddddddddddd                216MB  3 weeks ago           1                                        │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
-│                                                                                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────── 1/5 ─╯
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────── 1/6 ─╯
 ╭─ <none> ─────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ id       sha256:0123456789ab0000000000000000000000000000000000000000000000000000                                     │
+│ platform linux/arm64                                                                                                 │
 │ size     412MB                                                                                                       │
 │ created  2 days ago                                                                                                  │
 │ used by  —                                                                                                           │
 │                                                                                                                      │
 │ dangling · removed by p prune                                                                                        │
-│                                                                                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
  ↑↓ move  tab view  d remove  / filter  i details  N S T sort  p prune  ? help  q quit

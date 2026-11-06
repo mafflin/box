@@ -275,6 +275,8 @@ pub struct Snapshot {
     pub containers: Vec<Container>,
     pub images: Vec<Image>,
     pub volumes: Vec<Volume>,
+    /// Docker's platform, like `linux/arm64`, empty when unknown
+    pub host: String,
 }
 
 pub enum Action {
@@ -301,6 +303,8 @@ pub struct App {
     pub containers: Vec<Container>,
     pub images: Vec<Image>,
     pub volumes: Vec<Volume>,
+    /// Docker's platform, like `linux/arm64`, empty when unknown
+    pub host: String,
     pub stats: HashMap<String, Stats>,
     pub history: HashMap<String, History>,
     /// By container ID, and whether docker's done with it
@@ -334,6 +338,7 @@ impl App {
             containers: Vec::new(),
             images: Vec::new(),
             volumes: Vec::new(),
+            host: String::new(),
             stats: HashMap::new(),
             history: HashMap::new(),
             pending: HashMap::new(),
@@ -509,11 +514,16 @@ impl App {
                     container.ports.join(" ")
                 )
             }
-            View::Images => format!(
-                "{} {}",
-                self.images[index].reference(),
-                self.images[index].id
-            ),
+            View::Images => {
+                let image = &self.images[index];
+                // The platform only where it shows
+                let platform = if image.is_foreign(&self.host) {
+                    image.platform.as_str()
+                } else {
+                    ""
+                };
+                format!("{} {} {platform}", image.reference(), image.id)
+            }
             View::Volumes => self.volumes[index].name.clone(),
         }
     }
@@ -638,6 +648,7 @@ impl App {
         self.containers = snapshot.containers;
         self.images = snapshot.images;
         self.volumes = snapshot.volumes;
+        self.host = snapshot.host;
 
         let ids: Vec<&String> = self
             .containers
@@ -1197,6 +1208,15 @@ mod tests {
         assert_eq!(app.rows(View::Containers).len(), 4);
         press(&mut app, "⇥");
         assert_eq!(app.view, View::Images);
+    }
+
+    #[test]
+    fn filters_images_by_the_platform_shown() {
+        let mut app = sample::app();
+        press(&mut app, "2/amd64⏎");
+        assert_eq!(app.rows(View::Images).len(), 1);
+        press(&mut app, "⎋/arm64⏎");
+        assert_eq!(app.rows(View::Images), Vec::<usize>::new());
     }
 
     #[test]

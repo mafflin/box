@@ -1,0 +1,34 @@
+---
+source: src/dashboard/ui/mod.rs
+expression: screen
+---
+  Containers 5   Images 6   Volumes 4                                                                                           sort name ▲
+╭─ Images ──────────────────────────────────────────────────────────────────────────────────╮╭─ acme/api:dev ──────────────────────────────╮
+│ IMAGE ▲            ID            PLATFORM       SIZE      CREATED  CONTAINERS             ││ id       sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaa │
+│ <none>             0123456789ab                412MB   2 days ago           0             ││ platform linux/arm64                        │
+│ acme/api:dev       aaaaaaaaaaaa               1.21GB  3 hours ago           2             ││ tags     acme/api:dev                       │
+│ acme/api:latest    aaaaaaaaaaaa               1.21GB  3 hours ago           2             ││          acme/api:latest                    │
+│ nginx:1.27-alpine  cccccccccccc               48.2MB  12 days ago           1             ││ size     1.21GB                             │
+│ postgres:16        bbbbbbbbbbbb  linux/amd64   438MB  2 weeks ago           1             ││ created  3 hours ago                        │
+│ ruby:3.3-slim      dddddddddddd                216MB  3 weeks ago           1             ││ used by  api  Up 5 hours (healthy)          │
+│                                                                                           ││          worker  Exited (0) 3 hours ago     │
+│                                                                                           ││ command  /app/bin/docker-entrypoint ./bin/r │
+│                                                                                           ││ ports    3000/tcp                           │
+│                                                                                           ││ user     app                                │
+│                                                                                           ││ workdir  /app                               │
+│                                                                                           ││ source   https://github.com/acme/api        │
+│                                                                                           ││ version  2.4.0 · 9f3c2a71be0d               │
+│                                                                                           ││                                             │
+│                                                                                           ││                                             │
+│                                                                                           ││                                             │
+│                                                                                           ││                                             │
+│                                                                                           ││                                             │
+│                                                                                           ││                                             │
+│                                                                                           ││                                             │
+│                                                                                           ││                                             │
+│                                                                                           ││                                             │
+│                                                                                           ││                                             │
+│                                                                                           ││                                             │
+│                                                                                           ││                                             │
+╰───────────────────────────────────────────────────────────────────────────────────── 2/6 ─╯╰─────────────────────────────────────────────╯
+ ↑↓ move  tab view  d remove  / filter  i details  N S T sort  p prune  ? help  q quit                                       details: right

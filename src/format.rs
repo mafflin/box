@@ -89,6 +89,30 @@ fn shorten(path: &str, home: &str) -> String {
     }
 }
 
+/// Arguments as a shell takes them, quoting the ones that need it; a `sh -c` script as it's written
+pub fn command(args: &[String]) -> String {
+    if let [shell, flag, script] = args
+        && flag == "-c"
+        && matches!(shell.as_str(), "sh" | "/bin/sh" | "bash" | "/bin/bash")
+    {
+        return script.clone();
+    }
+    args.iter()
+        .map(|arg| {
+            let safe = !arg.is_empty()
+                && arg
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "-_./:=@%+,".contains(c));
+            if safe {
+                arg.clone()
+            } else {
+                format!("'{}'", arg.replace('\'', r"'\''"))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// The first 12 hex digits, without `sha256:`
 pub fn short_id(id: &str) -> &str {
     let id = id.strip_prefix(ID_PREFIX).unwrap_or(id);
@@ -328,6 +352,22 @@ mod tests {
             short_volume("myproject_postgres_data"),
             "myproject_postgres_data"
         );
+    }
+
+    #[test]
+    fn commands() {
+        let args = |args: &[&str]| args.iter().map(ToString::to_string).collect::<Vec<_>>();
+        assert_eq!(
+            command(&args(&["nginx", "-g", "daemon off;"])),
+            "nginx -g 'daemon off;'"
+        );
+        assert_eq!(command(&args(&["echo", "it's", ""])), r"echo 'it'\''s' ''");
+        assert_eq!(
+            command(&args(&["/bin/sh", "-c", "rails s -b 0.0.0.0"])),
+            "rails s -b 0.0.0.0"
+        );
+        assert_eq!(command(&args(&["/bin/sh", "-c"])), "/bin/sh -c");
+        assert_eq!(command(&[]), "");
     }
 
     #[test]

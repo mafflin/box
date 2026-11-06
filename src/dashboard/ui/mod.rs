@@ -292,6 +292,28 @@ mod tests {
         };
         assert_eq!(count("pgdata"), colors::COUNT);
         assert_eq!(count("old-data"), theme.dim);
+
+        // An image docker's host can't run natively
+        press(&mut app, "2");
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let screen: Vec<String> = (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect()
+            })
+            .collect();
+        let y = screen
+            .iter()
+            .position(|line| line.contains("postgres:16"))
+            .unwrap();
+        let x = screen[y]
+            .chars()
+            .take(screen[y].find("linux/amd64").unwrap())
+            .count();
+        let cell = &buffer[(u16::try_from(x).unwrap(), u16::try_from(y).unwrap())];
+        assert_eq!(cell.fg, theme.yellow);
     }
 
     #[test]
@@ -301,6 +323,14 @@ mod tests {
         assert_snapshot("images", &screen(&mut app, 120, 24));
         press(&mut app, "3");
         assert_snapshot("volumes", &screen(&mut app, 120, 24));
+        press(&mut app, "2ji");
+        assert_snapshot("image_details", &screen(&mut app, 140, 30));
+        press(&mut app, "jjj");
+        assert!(screen(&mut app, 140, 30).contains("platform linux/amd64 · host is linux/arm64"));
+        // Only while a shown image is foreign
+        assert!(screen(&mut app, 140, 30).contains("PLATFORM"));
+        press(&mut app, "/nginx⏎");
+        assert!(!screen(&mut app, 140, 30).contains("PLATFORM"));
     }
 
     #[test]

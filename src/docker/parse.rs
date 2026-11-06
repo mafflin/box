@@ -9,6 +9,8 @@ use crate::Result;
 use crate::format::{self, parse_size, parse_size_pair};
 
 pub const UNTAGGED: &str = "<none>";
+/// The most of a label or command that's kept
+const MAX_TEXT: usize = 1000;
 
 /// A mount as `docker inspect` gives it
 #[derive(Deserialize, Clone, Debug, Default, PartialEq, Eq)]
@@ -103,6 +105,20 @@ pub struct Image {
     pub created_since: String,
     /// Seconds since the epoch, 0 when unknown
     pub created_at: i64,
+    /// Like `linux/arm64` or `linux/arm/v7`, empty when unknown
+    pub platform: String,
+    /// Docker image inspect gave its config, which the fields below come from
+    pub configured: bool,
+    /// The entrypoint, then the command
+    pub command: String,
+    pub user: String,
+    pub workdir: String,
+    /// Like `80/tcp`
+    pub ports: Vec<String>,
+    /// The `org.opencontainers.image` labels
+    pub source: String,
+    pub version: String,
+    pub revision: String,
 }
 
 impl Image {
@@ -126,6 +142,34 @@ impl Image {
     /// Unique even for the same image under several tags
     pub fn key(&self) -> String {
         format!("{}@{}", self.reference(), self.id)
+    }
+
+    /// Has a name to run it by, unlike a dangling image or one pulled by digest
+    pub fn is_tagged(&self) -> bool {
+        self.repository != UNTAGGED && self.tag != UNTAGGED
+    }
+
+    /// Built for another OS or CPU than docker's host, `linux/arm64` say, which runs it emulated if at all;
+    /// x86-64 runs 32-bit x86 natively, Apple's ARM CPUs don't run 32-bit ARM
+    pub fn is_foreign(&self, host: &str) -> bool {
+        let built_for = |platform: &str| {
+            self.platform
+                .strip_prefix(platform)
+                .is_some_and(|variant| variant.is_empty() || variant.starts_with('/'))
+        };
+        if host.is_empty() || self.platform.is_empty() {
+            return false;
+        }
+        let native = built_for(host) || (host == "linux/amd64" && built_for("linux/386"));
+        !native
+    }
+
+    pub fn shown_user(&self) -> &str {
+        shown_user(&self.user)
+    }
+
+    pub fn shown_workdir(&self) -> &str {
+        shown_workdir(&self.workdir)
     }
 }
 
@@ -229,6 +273,31 @@ struct ImageLine {
     created_since: String,
     #[serde(default)]
     created_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct ImageInspect {
+    id: String,
+    #[serde(default)]
+    os: Option<String>,
+    #[serde(default)]
+    architecture: Option<String>,
+    #[serde(default)]
+    variant: Option<String>,
+    #[serde(default)]
+    config: Option<ImageConfig>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "PascalCase", default)]
+struct ImageConfig {
+    user: Option<String>,
+    working_dir: Option<String>,
+    entrypoint: Option<Vec<String>>,
+    cmd: Option<Vec<String>>,
+    exposed_ports: Option<BTreeMap<String, serde_json::Value>>,
+    labels: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Deserialize)]
@@ -338,15 +407,30 @@ fn container(line: PsLine, details: &Inspect) -> Container {
     }
 }
 
-/// `docker image ls --no-trunc --format '{{json .}}'` lines
-pub fn images(lines: &[String]) -> Result<Vec<Image>> {
+/// The images' IDs from `docker image ls --no-trunc --format '{{json .}}'` lines, once for several tags
+pub fn image_ids(lines: &[String]) -> Vec<String> {
+    let mut ids: Vec<String> = Vec::new();
+    for line in lines {
+        if let Ok(line) = serde_json::from_str::<ImageLine>(line)
+            && !ids.contains(&line.id)
+        {
+            ids.push(line.id);
+        }
+    }
+    ids
+}
+
+/// `docker image ls --no-trunc --format '{{json .}}'` lines and `docker image inspect` of them; an image
+/// that's gone from the inspect, or all of them when it can't be read, keep only what ls says
+pub fn images(lines: &[String], inspect: &str) -> Result<Vec<Image>> {
+    let inspected: Vec<ImageInspect> = serde_json::from_str(inspect).unwrap_or_default();
     lines
         .iter()
         .filter(|line| !line.trim().is_empty())
         .map(|line| {
             let line: ImageLine =
                 serde_json::from_str(line).context("can't read docker image ls")?;
-            Ok(Image {
+            let mut image = Image {
                 size_bytes: parse_size(&line.size).unwrap_or(0),
                 created_at: image_created_at(&line.created_at),
                 repository: line.repository,
@@ -354,9 +438,60 @@ pub fn images(lines: &[String]) -> Result<Vec<Image>> {
                 id: line.id,
                 size: line.size,
                 created_since: line.created_since,
-            })
+                ..Image::default()
+            };
+            if let Some(details) = inspected.iter().find(|details| details.id == image.id) {
+                add_details(&mut image, details);
+            }
+            Ok(image)
         })
         .collect()
+}
+
+/// What the image runs and was built for; its labels and command are its author's, so they're made plain
+/// text that can't change the terminal
+fn add_details(image: &mut Image, details: &ImageInspect) {
+    image.platform = [&details.os, &details.architecture, &details.variant]
+        .into_iter()
+        .flatten()
+        .filter(|part| !part.is_empty())
+        .map(|part| plain(part))
+        .collect::<Vec<_>>()
+        .join("/");
+    let Some(config) = &details.config else {
+        return;
+    };
+    image.configured = true;
+    let args: Vec<String> = [&config.entrypoint, &config.cmd]
+        .into_iter()
+        .flatten()
+        .flatten()
+        .cloned()
+        .collect();
+    image.command = plain(&format::command(&args));
+    image.user = plain(config.user.as_deref().unwrap_or_default());
+    image.workdir = plain(config.working_dir.as_deref().unwrap_or_default());
+    image.ports = config
+        .exposed_ports
+        .iter()
+        .flatten()
+        .map(|(port, _)| plain(port))
+        .collect();
+    let label = |name: &str| {
+        config
+            .labels
+            .as_ref()
+            .and_then(|labels| labels.get(&format!("org.opencontainers.image.{name}")))
+            .map_or_else(String::new, |value| plain(value))
+    };
+    image.source = label("source");
+    image.version = label("version");
+    image.revision = label("revision");
+}
+
+/// One line of text that can't change the terminal
+fn plain(text: &str) -> String {
+    format::sanitize(text.replace(['\r', '\n'], " ").as_bytes(), MAX_TEXT)
 }
 
 /// Like `2026-10-12 10:00:00 +0200 CEST`
@@ -464,8 +599,9 @@ mod tests {
             r#"{"Repository":"nginx","Tag":"1.27","ID":"sha256:abcdefabcdef00","Size":"193MB","CreatedSince":"5 minutes ago","CreatedAt":"2026-10-12 10:00:00 +0200 CEST"}"#.to_string(),
             r#"{"Repository":"<none>","Tag":"<none>","ID":"sha256:0123456789ab99","Size":"1kB","CreatedSince":"1 day ago","CreatedAt":"bad"}"#.to_string(),
         ];
-        let images = super::images(&lines).unwrap();
+        let images = super::images(&lines, "").unwrap();
         assert_eq!(images[0].reference(), "nginx:1.27");
+        assert_eq!(images[0].platform, "");
         assert_eq!(images[0].size_bytes, 193_000_000);
         assert_eq!(images[0].created_at, 1_791_792_000);
         assert_eq!(images[0].removal_target(), "nginx:1.27");
@@ -473,6 +609,103 @@ mod tests {
         assert_eq!(images[1].removal_target(), "0123456789ab");
         assert_eq!(images[1].created_at, 0);
         assert!(images[1].is_dangling());
+    }
+
+    #[test]
+    fn reads_image_details() {
+        let lines = vec![
+            r#"{"Repository":"nginx","Tag":"1.27","ID":"sha256:aaa","Size":"193MB"}"#.to_string(),
+            r#"{"Repository":"nginx","Tag":"latest","ID":"sha256:aaa","Size":"193MB"}"#.to_string(),
+            r#"{"Repository":"app","Tag":"dev","ID":"sha256:bbb","Size":"1GB"}"#.to_string(),
+            r#"{"Repository":"gone","Tag":"1","ID":"sha256:ccc","Size":"1kB"}"#.to_string(),
+        ];
+        assert_eq!(
+            image_ids(&lines),
+            ["sha256:aaa", "sha256:bbb", "sha256:ccc"]
+        );
+        let inspect = r#"[{
+            "Id": "sha256:aaa", "Os": "linux", "Architecture": "arm64", "Variant": "v8",
+            "Config": {
+                "User": "", "WorkingDir": "", "Entrypoint": ["/docker-entrypoint.sh"],
+                "Cmd": ["nginx", "-g", "daemon off;"],
+                "ExposedPorts": {"80/tcp": {}, "443/tcp": {}},
+                "Labels": {
+                    "org.opencontainers.image.source": "https://github.com/nginx/docker-nginx\u001b]0;pwned\u0007",
+                    "org.opencontainers.image.version": "1.27.2",
+                    "maintainer": "NGINX"
+                }
+            }
+        }, {
+            "Id": "sha256:bbb", "Os": "linux", "Architecture": "amd64", "Variant": null,
+            "Config": {"User": "app", "WorkingDir": "/app", "Entrypoint": null, "Cmd": ["/bin/sh", "-c", "bin/rails server"],
+                "ExposedPorts": null, "Labels": null}
+        }]"#;
+        let images = super::images(&lines, inspect).unwrap();
+        let (nginx, app, gone) = (&images[0], &images[2], &images[3]);
+        assert_eq!(nginx.platform, "linux/arm64/v8");
+        assert_eq!(images[1].platform, "linux/arm64/v8");
+        assert_eq!(
+            nginx.command,
+            "/docker-entrypoint.sh nginx -g 'daemon off;'"
+        );
+        assert_eq!(nginx.ports, ["443/tcp", "80/tcp"]);
+        assert_eq!((nginx.shown_user(), nginx.shown_workdir()), ("root", "/"));
+        assert_eq!(nginx.source, "https://github.com/nginx/docker-nginx");
+        assert_eq!(
+            (nginx.version.as_str(), nginx.revision.as_str()),
+            ("1.27.2", "")
+        );
+        assert_eq!(app.platform, "linux/amd64");
+        assert_eq!(app.command, "bin/rails server");
+        assert_eq!((app.user.as_str(), app.workdir.as_str()), ("app", "/app"));
+        assert!(app.ports.is_empty() && app.source.is_empty());
+        assert_eq!((gone.platform.as_str(), gone.command.as_str()), ("", ""));
+
+        assert!(nginx.configured && !gone.configured);
+        assert!(!nginx.is_foreign("linux/arm64"));
+        assert!(app.is_foreign("linux/arm64"));
+        assert!(!app.is_foreign(""));
+        assert!(!gone.is_foreign("linux/arm64"));
+
+        // What can't be read leaves the images as ls has them
+        let images = super::images(&lines, "not json").unwrap();
+        assert_eq!(images.len(), 4);
+        assert!(
+            images
+                .iter()
+                .all(|image| image.platform.is_empty() && !image.configured)
+        );
+    }
+
+    #[test]
+    fn image_platforms() {
+        let lines = vec![r#"{"Repository":"x","Tag":"1","ID":"sha256:aaa"}"#.to_string()];
+        let inspect = r#"[{"Id": "sha256:aaa", "Os": "linux", "Architecture": "amd64", "Variant": "v2\u001b[31m", "Config": null}]"#;
+        let image = super::images(&lines, inspect).unwrap().remove(0);
+        assert_eq!(image.platform, "linux/amd64/v2");
+        assert!(!image.configured);
+
+        let built_for = |platform: &str| Image {
+            platform: platform.into(),
+            ..Image::default()
+        };
+        assert!(!built_for("linux/386").is_foreign("linux/amd64"));
+        assert!(built_for("linux/386").is_foreign("linux/arm64"));
+        assert!(built_for("linux/arm/v7").is_foreign("linux/arm64"));
+        assert!(built_for("linux/arm64x").is_foreign("linux/arm64"));
+        assert!(!built_for("linux/arm/v7").is_foreign("linux/arm"));
+    }
+
+    #[test]
+    fn tags() {
+        let image = |repository: &str, tag: &str| Image {
+            repository: repository.into(),
+            tag: tag.into(),
+            ..Image::default()
+        };
+        assert!(image("nginx", "1.27").is_tagged());
+        assert!(!image("nginx", UNTAGGED).is_tagged());
+        assert!(!image(UNTAGGED, UNTAGGED).is_tagged());
     }
 
     #[test]

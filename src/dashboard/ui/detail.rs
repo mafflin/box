@@ -199,9 +199,30 @@ fn users(
 
 fn image_lines(app: &App, image: &Image) -> Vec<Line<'static>> {
     let theme = app.theme;
-    let empty = fg(theme.dim);
+    let (value, empty) = (fg(theme.text), fg(theme.dim));
     let mut lines = Lines::new(&theme);
     lines.text("id", &image.id, fg(colors::ID), empty);
+    if image.is_foreign(&app.host) {
+        let platform = format!("{} · host is {}", image.platform, app.host);
+        lines.text("platform", platform, fg(theme.yellow), empty);
+    } else if !image.platform.is_empty() {
+        lines.text("platform", &image.platform, value, empty);
+    }
+    // Every tag when it has more than one, as removing one of them frees nothing
+    let mut tags: Vec<String> = app
+        .images
+        .iter()
+        .filter(|other| other.id == image.id && other.is_tagged())
+        .map(Image::reference)
+        .collect();
+    tags.sort();
+    let tags: Vec<Vec<Span<'static>>> = tags
+        .into_iter()
+        .map(|tag| vec![Span::styled(tag, fg(colors::IMAGE))])
+        .collect();
+    if tags.len() > 1 {
+        lines.add("tags", tags, empty);
+    }
     lines.text("size", &image.size, fg(colors::SIZE), empty);
     lines.text("created", &image.created_since, fg(colors::CREATED), empty);
     let used_by = users(app, &app.image_users(image), |container| {
@@ -210,8 +231,38 @@ fn image_lines(app: &App, image: &Image) -> Vec<Line<'static>> {
     let unused = used_by.is_empty();
     lines.add("used by", used_by, empty);
     if image.is_dangling() && unused {
+        // What's left of an old build, which pruning removes, so what it runs doesn't matter
         lines.lines.push(Line::default());
         lines.lines.push(prune_hint(&theme));
+        return lines.lines;
+    }
+    if image.configured {
+        let command = if image.command.is_empty() {
+            Vec::new()
+        } else {
+            vec![vec![Span::styled(image.command.clone(), value)]]
+        };
+        lines.add("command", command, empty);
+        let ports = image
+            .ports
+            .iter()
+            .map(|port| vec![Span::styled(port.clone(), fg(colors::PORTS))])
+            .collect();
+        lines.add("ports", ports, empty);
+        lines.text("user", image.shown_user(), fg(colors::USER), empty);
+        lines.text("workdir", image.shown_workdir(), fg(colors::WORKDIR), empty);
+    }
+    if !image.source.is_empty() {
+        lines.text("source", &image.source, value, empty);
+    }
+    let version = match (image.version.as_str(), image.revision.as_str()) {
+        ("", "") => String::new(),
+        (version, "") => version.to_string(),
+        ("", revision) => format::short_id(revision).to_string(),
+        (version, revision) => format!("{version} · {}", format::short_id(revision)),
+    };
+    if !version.is_empty() {
+        lines.text("version", version, value, empty);
     }
     lines.lines
 }

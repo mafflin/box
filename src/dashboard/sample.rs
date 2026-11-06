@@ -93,7 +93,8 @@ fn containers() -> Vec<Container> {
     vec![api, db, web, console, worker]
 }
 
-pub fn snapshot() -> Snapshot {
+/// For a linux/arm64 host: postgres is built for amd64, acme/api has two tags
+fn images() -> Vec<Image> {
     let image = |repository: &str,
                  tag: &str,
                  seed: char,
@@ -108,7 +109,94 @@ pub fn snapshot() -> Snapshot {
         size_bytes,
         created_since: since.into(),
         created_at,
+        platform: "linux/arm64".into(),
+        configured: true,
+        ..Image::default()
     };
+    let args = |args: &[&str]| {
+        crate::format::command(&args.iter().map(ToString::to_string).collect::<Vec<_>>())
+    };
+    let api = Image {
+        command: args(&["/app/bin/docker-entrypoint", "./bin/rails", "server"]),
+        user: "app".into(),
+        workdir: "/app".into(),
+        ports: vec!["3000/tcp".into()],
+        source: "https://github.com/acme/api".into(),
+        version: "2.4.0".into(),
+        revision: "9f3c2a71be0d4c5e8a6b".into(),
+        ..image(
+            "acme/api",
+            "dev",
+            'a',
+            "1.21GB",
+            1_210_000_000,
+            "3 hours ago",
+            300,
+        )
+    };
+
+    vec![
+        Image {
+            tag: "latest".into(),
+            ..api.clone()
+        },
+        api,
+        Image {
+            platform: "linux/amd64".into(),
+            command: args(&["docker-entrypoint.sh", "postgres"]),
+            ports: vec!["5432/tcp".into()],
+            ..image(
+                "postgres",
+                "16",
+                'b',
+                "438MB",
+                438_000_000,
+                "2 weeks ago",
+                200,
+            )
+        },
+        Image {
+            platform: "linux/arm64/v8".into(),
+            command: args(&["/docker-entrypoint.sh", "nginx", "-g", "daemon off;"]),
+            ports: vec!["80/tcp".into()],
+            ..image(
+                "nginx",
+                "1.27-alpine",
+                'c',
+                "48.2MB",
+                48_200_000,
+                "12 days ago",
+                210,
+            )
+        },
+        Image {
+            command: args(&["irb"]),
+            ..image(
+                "ruby",
+                "3.3-slim",
+                'd',
+                "216MB",
+                216_000_000,
+                "3 weeks ago",
+                100,
+            )
+        },
+        Image {
+            id: format!("sha256:0123456789ab{}", "0".repeat(52)),
+            ..image(
+                "<none>",
+                "<none>",
+                'e',
+                "412MB",
+                412_000_000,
+                "2 days ago",
+                250,
+            )
+        },
+    ]
+}
+
+pub fn snapshot() -> Snapshot {
     let volume = |name: &str, created: &str, created_at| Volume {
         name: name.into(),
         driver: "local".into(),
@@ -119,62 +207,14 @@ pub fn snapshot() -> Snapshot {
 
     Snapshot {
         containers: containers(),
-        images: vec![
-            image(
-                "acme/api",
-                "dev",
-                'a',
-                "1.21GB",
-                1_210_000_000,
-                "3 hours ago",
-                300,
-            ),
-            image(
-                "postgres",
-                "16",
-                'b',
-                "438MB",
-                438_000_000,
-                "2 weeks ago",
-                200,
-            ),
-            image(
-                "nginx",
-                "1.27-alpine",
-                'c',
-                "48.2MB",
-                48_200_000,
-                "12 days ago",
-                210,
-            ),
-            image(
-                "ruby",
-                "3.3-slim",
-                'd',
-                "216MB",
-                216_000_000,
-                "3 weeks ago",
-                100,
-            ),
-            Image {
-                id: format!("sha256:0123456789ab{}", "0".repeat(52)),
-                ..image(
-                    "<none>",
-                    "<none>",
-                    'e',
-                    "412MB",
-                    412_000_000,
-                    "2 days ago",
-                    250,
-                )
-            },
-        ],
+        images: images(),
         volumes: vec![
             volume("pgdata", "2026-10-15 09:30", 100),
             volume("nginx-cache", "2026-10-24 18:02", 200),
             volume("bundle", "2026-10-29 11:45", 300),
             volume("old-data", "2026-03-02 08:00", 50),
         ],
+        host: "linux/arm64".into(),
     }
 }
 

@@ -309,6 +309,8 @@ fn images(app: &App, rows: &[usize]) -> (Vec<Column>, Vec<bool>) {
     let theme = app.theme;
     let mut image = Column::new("IMAGE", Some(SortKey::Name)).flex(3, 10);
     let mut id = Column::new("ID", None);
+    // Only for images docker's host can't run natively, when there are any
+    let mut platform = Column::new("PLATFORM", None);
     let mut size = Column::new("SIZE", Some(SortKey::Size)).right();
     let mut created = Column::new("CREATED", Some(SortKey::Created)).right();
     let mut users = Column::new("CONTAINERS", None).right();
@@ -316,6 +318,15 @@ fn images(app: &App, rows: &[usize]) -> (Vec<Column>, Vec<bool>) {
         image.cells.push((entry.reference(), fg(colors::IMAGE)));
         id.cells
             .push((short_id(&entry.id).to_string(), fg(colors::ID)));
+        let foreign = entry.is_foreign(&app.host);
+        platform.cells.push((
+            if foreign {
+                entry.platform.clone()
+            } else {
+                String::new()
+            },
+            fg(theme.yellow),
+        ));
         size.cells.push((entry.size.clone(), fg(colors::SIZE)));
         created
             .cells
@@ -329,7 +340,11 @@ fn images(app: &App, rows: &[usize]) -> (Vec<Column>, Vec<bool>) {
         .iter()
         .map(crate::docker::Image::is_dangling)
         .collect();
-    let mut columns = vec![image, id, size, created, users];
+    let mut columns = vec![image, id];
+    if rows.iter().any(|&row| !platform.cells[row].0.is_empty()) {
+        columns.push(platform);
+    }
+    columns.extend([size, created, users]);
     keep_rows(&mut columns, rows);
     (columns, dimmed)
 }

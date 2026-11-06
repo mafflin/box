@@ -144,8 +144,17 @@ fn args(args: &[&str]) -> Vec<String> {
 /// Looks now, then every few seconds, or soon after a request
 fn refresher(requests: &Receiver<()>, snapshots: &Sender<Action>) {
     let mut last = Instant::now();
+    let mut host = String::new();
     loop {
-        if snapshots.send(Action::Snapshot(snapshot())).is_err() {
+        if host.is_empty() {
+            host = host_platform().unwrap_or_default();
+        }
+        let snapshot = snapshot(&host);
+        // Docker may come back on another platform, like Colima restarted for x86-64
+        if snapshot.is_err() {
+            host.clear();
+        }
+        if snapshots.send(Action::Snapshot(snapshot)).is_err() {
             return;
         }
         last = last.max(Instant::now());
@@ -161,8 +170,18 @@ fn refresher(requests: &Receiver<()>, snapshots: &Sender<Action>) {
     }
 }
 
-/// Containers with their details, images and volumes
-fn snapshot() -> Result<Snapshot, String> {
+/// Docker's OS and CPU, like `linux/arm64`, which don't change while it runs
+fn host_platform() -> Option<String> {
+    let lines = Captured
+        .lines(&["version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"])
+        .ok()?;
+    let platform = lines.first()?.trim();
+    (platform.len() > 2 && !platform.starts_with('/') && !platform.ends_with('/'))
+        .then(|| platform.to_string())
+}
+
+/// Containers, images and their details, and volumes
+fn snapshot(host: &str) -> Result<Snapshot, String> {
     let read = || -> crate::Result<Snapshot> {
         let ps = Captured.lines(&["ps", "--all", "--no-trunc", "--format", "{{json .}}"])?;
         let ids = docker::ps_ids(&ps);
@@ -174,6 +193,15 @@ fn snapshot() -> Result<Snapshot, String> {
             docker::partial_output(&args)?
         };
         let images = Captured.lines(&["image", "ls", "--no-trunc", "--format", "{{json .}}"])?;
+        let image_ids = docker::image_ids(&images);
+        let image_inspect = if image_ids.is_empty() {
+            String::new()
+        } else {
+            let mut args = vec!["image", "inspect"];
+            args.extend(image_ids.iter().map(String::as_str));
+            // Only details, the images show without them
+            docker::partial_output(&args).unwrap_or_default()
+        };
         let names = Captured.lines(&["volume", "ls", "-q"])?;
         let volumes = if names.is_empty() {
             String::new()
@@ -184,8 +212,9 @@ fn snapshot() -> Result<Snapshot, String> {
         };
         Ok(Snapshot {
             containers: docker::containers(&ps, &inspect)?,
-            images: docker::images(&images)?,
+            images: docker::images(&images, &image_inspect)?,
             volumes: docker::volumes(&volumes)?,
+            host: host.to_string(),
         })
     };
     read().map_err(|e| format!("{e:#}"))
