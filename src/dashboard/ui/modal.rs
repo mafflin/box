@@ -6,6 +6,7 @@ use ratatui::style::Color;
 use ratatui::text::{Line, Span};
 
 use super::{badge, bold, fg, fill, fit, padded, put, put_line, rounded_box, width};
+use crate::commands::PruneTarget;
 use crate::dashboard::app::{App, Confirm, Modal, PruneDialog};
 use crate::format::human_size;
 use crate::theme::Theme;
@@ -65,7 +66,8 @@ const HELP: [Section; 3] = [
 ];
 
 /// In `PruneTarget::ORDER`
-const PRUNE_LABELS: [&str; 3] = ["stopped containers", "unused volumes", "dangling images"];
+const PRUNE_LABELS: [&str; PruneTarget::ORDER.len()] =
+    ["stopped containers", "unused volumes", "dangling images"];
 const PRUNE_ORDER: &str = "runs in order: containers → volumes → images";
 
 pub fn draw(buf: &mut Buffer, area: Rect, app: &App) {

@@ -58,7 +58,7 @@ impl Docker for Captured {
 }
 
 /// Stdout even when docker fails, as long as it printed something, like inspect for a container that's gone
-pub fn partial_output(args: &[&str]) -> Result<String> {
+fn partial_output(args: &[&str]) -> Result<String> {
     let output = command(args)
         .stdin(Stdio::null())
         .output()
@@ -67,6 +67,16 @@ pub fn partial_output(args: &[&str]) -> Result<String> {
         return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
     }
     Err(error_message(args, &output))
+}
+
+/// `command` followed by every ID or name, as `partial_output` gives it; empty for none
+pub fn inspect_all(command: &[&str], ids: &[String]) -> Result<String> {
+    if ids.is_empty() {
+        return Ok(String::new());
+    }
+    let mut args = command.to_vec();
+    args.extend(ids.iter().map(String::as_str));
+    partial_output(&args)
 }
 
 /// Docker is installed and its daemon running

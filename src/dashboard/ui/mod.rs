@@ -18,10 +18,18 @@ use crate::theme::Theme;
 
 const MIN_WIDTH: u16 = 30;
 const MIN_HEIGHT: u16 = 6;
+/// A shorter body shows no details at the bottom
+const MIN_BODY_HEIGHT_FOR_BOTTOM: u16 = 14;
 /// The details at the bottom usually take this share of the body, up to `BOTTOM_DETAILS_ROWS`, and more
 /// when their lines need it
 const BOTTOM_DETAILS_PERCENT: u16 = 42;
 const BOTTOM_DETAILS_ROWS: u16 = 12;
+/// A narrower body shows no details on the right
+const MIN_BODY_WIDTH_FOR_RIGHT: u16 = 90;
+/// The details on the right take this share of the body, kept between the two widths below
+const RIGHT_DETAILS_PERCENT: u16 = 34;
+const MIN_RIGHT_DETAILS_WIDTH: u16 = 36;
+const MAX_RIGHT_DETAILS_WIDTH: u16 = 64;
 /// Shown for what has no value
 const NO_VALUE: &str = "—";
 
@@ -64,7 +72,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 /// The table, and its details below or beside it when there's room
 fn draw_body(buf: &mut Buffer, area: Rect, app: &mut App) {
     match app.details {
-        Details::Bottom if area.height >= 14 => {
+        Details::Bottom if area.height >= MIN_BODY_HEIGHT_FOR_BOTTOM => {
             // As tall as they need, never shorter than usual, at most half
             let usual = (area.height * BOTTOM_DETAILS_PERCENT / 100).min(BOTTOM_DETAILS_ROWS);
             let height = detail::height(app).clamp(usual, area.height / 2);
@@ -80,8 +88,9 @@ fn draw_body(buf: &mut Buffer, area: Rect, app: &mut App) {
                 true,
             );
         }
-        Details::Right if area.width >= 90 => {
-            let width = (area.width * 34 / 100).clamp(36, 64);
+        Details::Right if area.width >= MIN_BODY_WIDTH_FOR_RIGHT => {
+            let width = (area.width * RIGHT_DETAILS_PERCENT / 100)
+                .clamp(MIN_RIGHT_DETAILS_WIDTH, MAX_RIGHT_DETAILS_WIDTH);
             let table = Rect {
                 width: area.width - width,
                 ..area

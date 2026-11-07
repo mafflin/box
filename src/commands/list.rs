@@ -66,9 +66,7 @@ pub fn containers(docker: &impl Docker, extended: bool, theme: &Theme) -> Result
     if ids.is_empty() {
         return Ok(String::new());
     }
-    let mut args = vec!["inspect"];
-    args.extend(ids.iter().map(String::as_str));
-    let inspect = docker::partial_output(&args)?;
+    let inspect = docker::inspect_all(&["inspect"], &ids)?;
 
     let rows: Vec<Vec<Cell>> = docker::containers(&ps, &inspect)?
         .iter()

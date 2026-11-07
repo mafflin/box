@@ -176,40 +176,23 @@ fn host_platform() -> Option<String> {
         .lines(&["version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"])
         .ok()?;
     let platform = lines.first()?.trim();
-    (platform.len() > 2 && !platform.starts_with('/') && !platform.ends_with('/'))
-        .then(|| platform.to_string())
+    let known = platform
+        .split_once('/')
+        .is_some_and(|(os, arch)| !os.is_empty() && !arch.is_empty());
+    known.then(|| platform.to_string())
 }
 
 /// Containers, images and their details, and volumes
 fn snapshot(host: &str) -> Result<Snapshot, String> {
     let read = || -> crate::Result<Snapshot> {
         let ps = Captured.lines(&["ps", "--all", "--no-trunc", "--format", "{{json .}}"])?;
-        let ids = docker::ps_ids(&ps);
-        let inspect = if ids.is_empty() {
-            String::new()
-        } else {
-            let mut args = vec!["inspect"];
-            args.extend(ids.iter().map(String::as_str));
-            docker::partial_output(&args)?
-        };
+        let inspect = docker::inspect_all(&["inspect"], &docker::ps_ids(&ps))?;
         let images = Captured.lines(&["image", "ls", "--no-trunc", "--format", "{{json .}}"])?;
-        let image_ids = docker::image_ids(&images);
-        let image_inspect = if image_ids.is_empty() {
-            String::new()
-        } else {
-            let mut args = vec!["image", "inspect"];
-            args.extend(image_ids.iter().map(String::as_str));
-            // Only details, the images show without them
-            docker::partial_output(&args).unwrap_or_default()
-        };
+        // Only details, the images show without them
+        let image_inspect = docker::inspect_all(&["image", "inspect"], &docker::image_ids(&images))
+            .unwrap_or_default();
         let names = Captured.lines(&["volume", "ls", "-q"])?;
-        let volumes = if names.is_empty() {
-            String::new()
-        } else {
-            let mut args = vec!["volume", "inspect"];
-            args.extend(names.iter().map(String::as_str));
-            docker::partial_output(&args)?
-        };
+        let volumes = docker::inspect_all(&["volume", "inspect"], &names)?;
         Ok(Snapshot {
             containers: docker::containers(&ps, &inspect)?,
             images: docker::images(&images, &image_inspect)?,

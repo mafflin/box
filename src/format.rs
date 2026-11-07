@@ -12,6 +12,8 @@ use crate::docker::Mount;
 use crate::paths;
 
 pub const SHORT_ID_LENGTH: usize = 12;
+/// Hex digits in a full docker ID, which anonymous volumes are named like
+const FULL_ID_LENGTH: usize = 64;
 const ID_PREFIX: &str = "sha256:";
 const READ_ONLY_SUFFIX: &str = ":ro";
 const HOME_SHORTCUT: &str = "~";
@@ -96,7 +98,7 @@ pub fn shorten_middle(text: &str, width: usize) -> String {
 
 /// Docker names anonymous volumes with 64 hex digits
 pub fn is_anonymous_volume(name: &str) -> bool {
-    name.len() == 64 && name.bytes().all(|b| b.is_ascii_hexdigit())
+    name.len() == FULL_ID_LENGTH && name.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// An anonymous volume's first 12 hex digits, a named one whole
@@ -303,13 +305,7 @@ pub fn sanitize(line: &[u8], max_bytes: usize) -> String {
             break;
         }
     }
-    if clean.len() > max_bytes {
-        let mut end = max_bytes;
-        while !clean.is_char_boundary(end) {
-            end -= 1;
-        }
-        clean.truncate(end);
-    }
+    clean.truncate(clean.floor_char_boundary(max_bytes));
     clean
 }
 

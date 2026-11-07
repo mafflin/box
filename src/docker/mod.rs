@@ -8,7 +8,7 @@ pub use parse::{
     Container, Image, Mount, Stats, Volume, containers, image_ids, images, is_change, ps_ids,
     reference, stats, volumes,
 };
-pub use run::{Captured, Docker, Terminal, check, command, partial_output};
+pub use run::{Captured, Docker, Terminal, check, command, inspect_all};
 
 #[cfg(test)]
 pub use run::fake;

@@ -35,6 +35,8 @@ const BATCH: usize = 1000;
 const POLL: Duration = Duration::from_millis(50);
 /// What `e` runs in the container: bash, else sh
 const SHELL: &str = "command -v bash >/dev/null && exec bash || exec sh";
+/// The most of an error from docker that's kept
+const MAX_ERROR_BYTES: usize = 200;
 
 pub fn run() -> Result<()> {
     // Before taking over the screen, so the errors show
@@ -154,7 +156,7 @@ fn docker_error(stderr: &[u8]) -> Option<String> {
         .lines()
         .map(str::trim)
         .find(|line| !line.is_empty())
-        .map(|line| format::sanitize(line.as_bytes(), 200))
+        .map(|line| format::sanitize(line.as_bytes(), MAX_ERROR_BYTES))
 }
 
 /// The input thread, which can stop reading the keyboard while a shell has it

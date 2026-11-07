@@ -16,6 +16,12 @@ const MAX_LOG_LINE_BYTES: usize = 4096;
 /// How far back a line from the other output can go
 const LOG_REORDER: usize = 200;
 const TOAST_TIME: Duration = Duration::from_millis(3500);
+/// How many views there are, for what each keeps
+const VIEWS: usize = View::ALL.len();
+/// How many things prune can remove
+const PRUNE_TARGETS: usize = PruneTarget::ORDER.len();
+/// Rows a page moves until the first draw measures the table and the logs
+const FIRST_PAGE: usize = 10;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum View {
@@ -262,7 +268,7 @@ pub struct Confirm {
 
 pub struct PruneDialog {
     pub cursor: usize,
-    pub chosen: [bool; 3],
+    pub chosen: [bool; PRUNE_TARGETS],
 }
 
 pub enum Modal {
@@ -334,15 +340,15 @@ pub struct App {
     pub history: HashMap<String, History>,
     /// By container ID, and whether docker's done with it
     pending: HashMap<String, (Pending, bool)>,
-    selected: [Option<String>; 3],
-    index: [usize; 3],
-    pub scroll: [usize; 3],
+    selected: [Option<String>; VIEWS],
+    index: [usize; VIEWS],
+    pub scroll: [usize; VIEWS],
     /// Rows the table shows, for page up and down
     pub page: usize,
     pub log_page: usize,
-    pub sort: [Sort; 3],
+    pub sort: [Sort; VIEWS],
     pub show_all: bool,
-    pub filter: [String; 3],
+    pub filter: [String; VIEWS],
     pub filtering: bool,
     pub details: Details,
     pub modal: Option<Modal>,
@@ -367,11 +373,11 @@ impl App {
             stats: HashMap::new(),
             history: HashMap::new(),
             pending: HashMap::new(),
-            selected: [None, None, None],
-            index: [0; 3],
-            scroll: [0; 3],
-            page: 10,
-            log_page: 10,
+            selected: Default::default(),
+            index: [0; VIEWS],
+            scroll: [0; VIEWS],
+            page: FIRST_PAGE,
+            log_page: FIRST_PAGE,
             sort: [
                 Sort {
                     key: SortKey::Started,
@@ -387,7 +393,7 @@ impl App {
                 },
             ],
             show_all: true,
-            filter: [String::new(), String::new(), String::new()],
+            filter: Default::default(),
             filtering: false,
             details: Details::Bottom,
             modal: None,
@@ -406,12 +412,7 @@ impl App {
             Action::Key(key) => self.key(key),
             Action::Resize => Vec::new(),
             Action::ShellFailed { name, message } => {
-                let message = if message.contains("executable file not found") {
-                    format!("no shell in {name}")
-                } else {
-                    format!("can't open a shell in {name}: {message}")
-                };
-                self.toast(message, Tone::Bad);
+                self.shell_failed(&name, &message);
                 Vec::new()
             }
             Action::Snapshot(snapshot) => self.snapshot(snapshot),
@@ -424,27 +425,44 @@ impl App {
                 Vec::new()
             }
             Action::LogEnded { session } => {
-                if let Some(logs) = self.logs.as_mut().filter(|logs| logs.session == session) {
-                    logs.ended = true;
-                }
+                self.log_ended(session);
                 Vec::new()
             }
-            Action::Done { task, result } => {
-                if let Task::Run {
-                    container: Some((id, _)),
-                    ..
-                } = &task
-                    && let Some(pending) = self.pending.get_mut(id)
-                {
-                    pending.1 = true;
-                }
-                match result {
-                    Ok(message) => self.toast(message, Tone::Good),
-                    Err(message) => self.toast(message, Tone::Bad),
-                }
-                vec![Effect::Refresh]
-            }
+            Action::Done { task, result } => self.task_done(&task, result),
         }
+    }
+
+    /// Says why `e` didn't open a shell, shorter when the image has none
+    fn shell_failed(&mut self, name: &str, message: &str) {
+        let message = if message.contains("executable file not found") {
+            format!("no shell in {name}")
+        } else {
+            format!("can't open a shell in {name}: {message}")
+        };
+        self.toast(message, Tone::Bad);
+    }
+
+    fn log_ended(&mut self, session: u64) {
+        if let Some(logs) = self.logs.as_mut().filter(|logs| logs.session == session) {
+            logs.ended = true;
+        }
+    }
+
+    /// Its container is done with, it says how it went, and what docker has now is read again
+    fn task_done(&mut self, task: &Task, result: Result<String, String>) -> Vec<Effect> {
+        if let Task::Run {
+            container: Some((id, _)),
+            ..
+        } = task
+            && let Some(pending) = self.pending.get_mut(id)
+        {
+            pending.1 = true;
+        }
+        match result {
+            Ok(message) => self.toast(message, Tone::Good),
+            Err(message) => self.toast(message, Tone::Bad),
+        }
+        vec![Effect::Refresh]
     }
 
     /// Drops an old message, true when it did
@@ -652,7 +670,7 @@ impl App {
     }
 
     /// Stopped containers, unused volumes and dangling images no container uses, as prune would find them
-    pub fn prunable(&self) -> [(usize, u64); 3] {
+    pub fn prunable(&self) -> [(usize, u64); PRUNE_TARGETS] {
         let containers = self
             .containers
             .iter()
@@ -696,7 +714,12 @@ impl App {
         self.images = snapshot.images;
         self.volumes = snapshot.volumes;
         self.host = snapshot.host;
+        self.forget_removed_containers();
+        self.close_interactive_logs()
+    }
 
+    /// The stats, history and pending changes of containers that are gone, and the changes docker's done with
+    fn forget_removed_containers(&mut self) {
         let ids: Vec<&String> = self
             .containers
             .iter()
@@ -706,27 +729,30 @@ impl App {
         self.history.retain(|id, _| ids.contains(&id));
         self.pending
             .retain(|id, (_, done)| !*done && ids.contains(&id));
+    }
 
-        let mut effects = Vec::new();
-        if let Some(logs) = &self.logs
-            && let Some(container) = self
-                .containers
-                .iter()
-                .find(|container| container.id == logs.id)
-            && container.is_interactive()
-        {
-            let message = format!(
-                "{} is now interactive ({}), logs closed",
-                container.name,
-                container.interactive_flags()
-            );
-            effects.push(Effect::CloseLogs {
-                session: logs.session,
-            });
-            self.logs = None;
-            self.toast(message, Tone::Warn);
-        }
-        effects
+    /// The logs of a container that's been recreated with `-t` or `-i`, whose output is a terminal session now
+    fn close_interactive_logs(&mut self) -> Vec<Effect> {
+        let Some(logs) = &self.logs else {
+            return Vec::new();
+        };
+        let Some(container) = self
+            .containers
+            .iter()
+            .find(|container| container.id == logs.id)
+            .filter(|container| container.is_interactive())
+        else {
+            return Vec::new();
+        };
+        let message = format!(
+            "{} is now interactive ({}), logs closed",
+            container.name,
+            container.interactive_flags()
+        );
+        let session = logs.session;
+        self.logs = None;
+        self.toast(message, Tone::Warn);
+        vec![Effect::CloseLogs { session }]
     }
 
     fn add_stats(&mut self, stats: Stats) {
@@ -794,29 +820,17 @@ impl App {
             KeyCode::Home | KeyCode::Char('g') => self.move_selection(Move::Top),
             KeyCode::End | KeyCode::Char('G') => self.move_selection(Move::Bottom),
             KeyCode::Tab | KeyCode::Right => self.switch_view(1),
-            KeyCode::BackTab | KeyCode::Left => self.switch_view(2),
+            // One back, around the end
+            KeyCode::BackTab | KeyCode::Left => self.switch_view(VIEWS - 1),
             KeyCode::Char(c @ '1'..='3') => self.view = View::ALL[usize::from(c as u8 - b'1')],
             KeyCode::Char('/') => self.filtering = true,
             KeyCode::Esc => self.filter[self.view.index()].clear(),
-            KeyCode::Char('a') if self.view == View::Containers => {
-                self.show_all = !self.show_all;
-                let shown = if self.show_all {
-                    "showing all containers"
-                } else {
-                    "showing running containers"
-                };
-                self.toast(shown, Tone::Info);
-            }
+            KeyCode::Char('a') if self.view == View::Containers => self.toggle_show_all(),
             KeyCode::Char('i') => {
                 self.details = self.details.next();
                 self.toast(format!("details: {}", self.details.label()), Tone::Info);
             }
-            KeyCode::Char('p') => {
-                self.modal = Some(Modal::Prune(PruneDialog {
-                    cursor: 0,
-                    chosen: [true; 3],
-                }));
-            }
+            KeyCode::Char('p') => self.open_prune(),
             KeyCode::Char('?') => self.modal = Some(Modal::Help),
             KeyCode::Char('q') => return vec![Effect::Quit],
             KeyCode::Char('s') => return self.start_or_stop(),
@@ -832,6 +846,25 @@ impl App {
             _ => {}
         }
         Vec::new()
+    }
+
+    /// All containers or only the running ones
+    fn toggle_show_all(&mut self) {
+        self.show_all = !self.show_all;
+        let shown = if self.show_all {
+            "showing all containers"
+        } else {
+            "showing running containers"
+        };
+        self.toast(shown, Tone::Info);
+    }
+
+    /// Every target chosen, the cursor on the first
+    fn open_prune(&mut self) {
+        self.modal = Some(Modal::Prune(PruneDialog {
+            cursor: 0,
+            chosen: [true; PRUNE_TARGETS],
+        }));
     }
 
     fn switch_view(&mut self, by: usize) {
@@ -914,79 +947,81 @@ impl App {
         };
         let row = rows[position];
         match self.view {
-            View::Containers => {
-                let container = self.containers[row].clone();
-                if self.pending.contains_key(&container.id) {
-                    return;
-                }
-                let name = &container.name;
-                let (title, args): (&str, &[&str]) = if container.is_up() {
-                    ("Force remove", &["rm", "-f", "-v"])
-                } else {
-                    ("Remove", &["rm", "-v"])
-                };
-                let mut args = args.to_vec();
-                args.push(&container.id);
-                self.confirm(
-                    title,
-                    format!("{title} container {name}?"),
-                    true,
-                    run(
-                        &args,
-                        Some((&container.id, Pending::Removing)),
-                        format!("removed {name}"),
-                    ),
-                );
-            }
-            View::Images => {
-                let image = self.images[row].clone();
-                let users = self.image_users(&image).len();
-                if users > 0 {
-                    self.toast(
-                        format!(
-                            "{} is used by {}",
-                            image.reference(),
-                            format::plural(users, "container")
-                        ),
-                        Tone::Bad,
-                    );
-                    return;
-                }
-                let target = image.removal_target();
-                self.confirm(
-                    "Remove image",
-                    format!("Remove {} ({})?", image.reference(), image.size),
-                    true,
-                    run(
-                        &["rmi", &target],
-                        None,
-                        format!("removed image {}", image.reference()),
-                    ),
-                );
-            }
-            View::Volumes => {
-                let volume = self.volumes[row].clone();
-                let name = format::short_volume(&volume.name).to_string();
-                let users = self.volume_users(&volume).len();
-                if users > 0 {
-                    self.toast(
-                        format!("{name} is used by {}", format::plural(users, "container")),
-                        Tone::Bad,
-                    );
-                    return;
-                }
-                self.confirm(
-                    "Remove volume",
-                    format!("Remove volume {name}?"),
-                    true,
-                    run(
-                        &["volume", "rm", &volume.name],
-                        None,
-                        format!("removed volume {name}"),
-                    ),
-                );
-            }
+            View::Containers => self.remove_container(row),
+            View::Images => self.remove_image(row),
+            View::Volumes => self.remove_volume(row),
         }
+    }
+
+    /// Forced when it's up, with its anonymous volumes; not while something else is happening to it
+    fn remove_container(&mut self, row: usize) {
+        let container = self.containers[row].clone();
+        if self.pending.contains_key(&container.id) {
+            return;
+        }
+        let name = &container.name;
+        let (title, args): (&str, &[&str]) = if container.is_up() {
+            ("Force remove", &["rm", "-f", "-v"])
+        } else {
+            ("Remove", &["rm", "-v"])
+        };
+        let mut args = args.to_vec();
+        args.push(&container.id);
+        self.confirm(
+            title,
+            format!("{title} container {name}?"),
+            true,
+            run(
+                &args,
+                Some((&container.id, Pending::Removing)),
+                format!("removed {name}"),
+            ),
+        );
+    }
+
+    fn remove_image(&mut self, row: usize) {
+        let image = self.images[row].clone();
+        if self.in_use(&image.reference(), self.image_users(&image).len()) {
+            return;
+        }
+        let target = image.removal_target();
+        self.confirm(
+            "Remove image",
+            format!("Remove {} ({})?", image.reference(), image.size),
+            true,
+            run(
+                &["rmi", &target],
+                None,
+                format!("removed image {}", image.reference()),
+            ),
+        );
+    }
+
+    fn remove_volume(&mut self, row: usize) {
+        let volume = self.volumes[row].clone();
+        let name = format::short_volume(&volume.name).to_string();
+        if self.in_use(&name, self.volume_users(&volume).len()) {
+            return;
+        }
+        self.confirm(
+            "Remove volume",
+            format!("Remove volume {name}?"),
+            true,
+            run(
+                &["volume", "rm", &volume.name],
+                None,
+                format!("removed volume {name}"),
+            ),
+        );
+    }
+
+    /// Whether containers use what's named, saying so when they do
+    fn in_use(&mut self, name: &str, users: usize) -> bool {
+        if users > 0 {
+            let message = format!("{name} is used by {}", format::plural(users, "container"));
+            self.toast(message, Tone::Bad);
+        }
+        users > 0
     }
 
     fn confirm(&mut self, title: &str, question: String, danger: bool, task: Task) {
@@ -1136,35 +1171,38 @@ impl App {
                 KeyCode::Char('n' | 'N' | 'q') | KeyCode::Esc | KeyCode::Enter => {}
                 _ => self.modal = Some(Modal::Confirm(confirm)),
             },
-            Modal::Prune(mut dialog) => match key.code {
-                KeyCode::Down | KeyCode::Char('j') => {
-                    dialog.cursor = (dialog.cursor + 1) % 3;
-                    self.modal = Some(Modal::Prune(dialog));
-                }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    dialog.cursor = (dialog.cursor + 2) % 3;
-                    self.modal = Some(Modal::Prune(dialog));
-                }
-                KeyCode::Char(' ') => {
-                    dialog.chosen[dialog.cursor] = !dialog.chosen[dialog.cursor];
-                    self.modal = Some(Modal::Prune(dialog));
-                }
-                KeyCode::Enter => {
-                    let targets: Vec<PruneTarget> = PruneTarget::ORDER
-                        .into_iter()
-                        .zip(dialog.chosen)
-                        .filter_map(|(target, chosen)| chosen.then_some(target))
-                        .collect();
-                    if targets.is_empty() {
-                        return Vec::new();
-                    }
-                    self.toast("pruning…", Tone::Info);
-                    return vec![Effect::Start(Task::Prune(targets))];
-                }
-                KeyCode::Esc | KeyCode::Char('q' | 'p') => {}
-                _ => self.modal = Some(Modal::Prune(dialog)),
-            },
+            Modal::Prune(dialog) => return self.prune_key(dialog, key),
         }
+        Vec::new()
+    }
+
+    /// Moves through, toggles, runs or closes the prune dialog; running nothing closes it too
+    fn prune_key(&mut self, mut dialog: PruneDialog, key: KeyEvent) -> Vec<Effect> {
+        match key.code {
+            KeyCode::Down | KeyCode::Char('j') => {
+                dialog.cursor = (dialog.cursor + 1) % PRUNE_TARGETS;
+            }
+            // One back, around the top
+            KeyCode::Up | KeyCode::Char('k') => {
+                dialog.cursor = (dialog.cursor + PRUNE_TARGETS - 1) % PRUNE_TARGETS;
+            }
+            KeyCode::Char(' ') => dialog.chosen[dialog.cursor] = !dialog.chosen[dialog.cursor],
+            KeyCode::Enter => {
+                let targets: Vec<PruneTarget> = PruneTarget::ORDER
+                    .into_iter()
+                    .zip(dialog.chosen)
+                    .filter_map(|(target, chosen)| chosen.then_some(target))
+                    .collect();
+                if targets.is_empty() {
+                    return Vec::new();
+                }
+                self.toast("pruning…", Tone::Info);
+                return vec![Effect::Start(Task::Prune(targets))];
+            }
+            KeyCode::Esc | KeyCode::Char('q' | 'p') => return Vec::new(),
+            _ => {}
+        }
+        self.modal = Some(Modal::Prune(dialog));
         Vec::new()
     }
 }
