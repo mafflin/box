@@ -42,6 +42,10 @@ const ASCENDING: &str = "▲";
 const DESCENDING: &str = "▼";
 /// Shown for what has no value
 const NO_VALUE: &str = "—";
+/// Before what a container received and sent over the network
+const NETWORK_MARKS: [&str; 2] = ["↓", "↑"];
+/// Before what it read from disk and wrote to it
+const DISK_MARKS: [&str; 2] = ["r", "w"];
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();

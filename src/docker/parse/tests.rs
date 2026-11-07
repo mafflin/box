@@ -2,6 +2,7 @@ use super::*;
 
 const INSPECT: &str = r#"[{
         "Id": "aaa", "Name": "/web", "Image": "sha256:img",
+        "Path": "/docker-entrypoint.sh", "Args": ["nginx", "-g", "daemon off;"],
         "Config": {"Image": "nginx:1.27", "User": "", "WorkingDir": "/srv", "Tty": false, "OpenStdin": true},
         "State": {"Status": "running", "ExitCode": 0, "StartedAt": "2026-10-15T09:30:00.123456789Z",
             "FinishedAt": "0001-01-01T00:00:00Z"},
@@ -13,7 +14,7 @@ const INSPECT: &str = r#"[{
             }
         },
         "Mounts": [{"Type": "volume", "Name": "html", "Source": "/var/lib", "Destination": "/srv", "RW": false}]
-    }, {"Id": "bbb", "Name": "/db", "Config": {"Image": "postgres"}, "State": {"Status": "exited", "ExitCode": 1},
+    }, {"Id": "bbb", "Name": "/db", "Path": "", "Args": null, "Config": {"Image": "postgres"}, "State": {"Status": "exited", "ExitCode": 1},
         "NetworkSettings": {"Networks": null, "Ports": {}}, "Mounts": null}]"#;
 
 #[test]
@@ -33,6 +34,8 @@ fn reads_containers() {
     assert_eq!(web.finished_at, 0);
     assert!(!db.is_up());
     assert_eq!(web.status, "Up 2 days");
+    assert_eq!(web.command, "/docker-entrypoint.sh nginx -g 'daemon off;'");
+    assert_eq!(db.command, "");
     assert_eq!(web.ips, ["172.18.0.3"]);
     assert_eq!(web.ports, ["443/tcp", "8080->80/tcp"]);
     assert_eq!(web.shown_user(), "root");
@@ -50,7 +53,7 @@ fn reads_containers() {
 fn container_text_from_the_image_is_plain() {
     let ps = vec![r#"{"ID":"aaa","Status":"Up"}"#.to_string()];
     let inspect = r#"[{
-            "Id": "aaa", "Name": "/web",
+            "Id": "aaa", "Name": "/web", "Path": "/bin/sh", "Args": ["-c", "run\u001b[2J\nnow"],
             "Config": {"Image": "app", "User": "\u001b[31mevil", "WorkingDir": "/srv\u001b]0;pwned\u0007"},
             "NetworkSettings": {"Ports": {"80/tcp\u001b[2J": null}},
             "Mounts": [{"Type": "volume", "Name": "data", "Source": "/var\u001b[H", "Destination": "/srv\u001b]0;x\u0007"}]
@@ -58,6 +61,8 @@ fn container_text_from_the_image_is_plain() {
     let web = super::containers(&ps, inspect).unwrap().remove(0);
     assert_eq!((web.user.as_str(), web.workdir.as_str()), ("evil", "/srv"));
     assert_eq!(web.ports, ["80/tcp"]);
+    // A shell's script as it's written, on one line
+    assert_eq!(web.command, "run now");
     let mount = &web.mounts[0];
     assert_eq!(
         (mount.source.as_str(), mount.destination.as_str()),

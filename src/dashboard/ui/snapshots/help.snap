@@ -5,31 +5,31 @@ expression: screen
 ---
   Containers 5   Images 6   Volumes 4                                  sort started ▼   showing all
 ╭─ Containers ─────────────────────────────────────────────────────────────────────────────────────╮
-│ NAME     IMAGE              STATUS ▼     CPU%   MEM    NET I/O  PIDS  PORTS                      │
-│ api      acme/api:dev       Up 40 minu…  18.0  649M  75M / 10M    12  3000->3000/tcp             │
-│ console  ruby:3.3-slim      Up 5 hours    0.1   35M  75M / 10M    12                             │
-│ db       p╭─ Keys ───────────────────────────────────────────────────────────────────╮           │
-│ web      n│                                                                          │3->443/tcp │
-│ worker   a│  General                                Containers                       │           │
-│           │  ↑↓ j k      move                       s           stop / start         │           │
+│ NAME     IMAGE              STATUS ▼    CPU%   MEM          NET I/O  PIDS  PORTS                 │
+│ api      acme/api:dev       Up 40 min…  18.0  649M  ↓  75M / ↑  10M    12  3000->3000/tcp        │
+│ console  r╭─ Keys ───────────────────────────────────────────────────────────────────╮           │
+│ db       p│                                                                          │           │
+│ web      n│  General                                Containers                       │p 8443->4… │
+│ worker   a│  ↑↓, j k     move                       s           stop / start         │           │
 │           │  g G         top / bottom               r           restart              │           │
-│           │  tab 1 2 3   switch view                d           remove               │           │
-│           │  /           filter                     l enter     logs (not for -it)   │           │
+│           │  tab, 1 2 3  switch view                d           remove               │           │
+│           │  /           filter                     l, enter    logs (not for -it)   │           │
 │           │  esc         clear filter               e           shell (bash or sh)   │           │
-│           │  P M N       sort cpu / mem / name      a           show stopped         │           │
-│           │  S           sort size                                                   │           │
-│           │  T           sort started / created     Images · Volumes                 │           │
-╰───────────│  i           details bottom/right/off   d           remove if unused     │───── 1/5 ─╯
-╭─ api ─────│  p           prune                                                       │───────────╮
-│ image    a│  q           quit                                                        │6%         │
-│ status   U│                                                                          │       ▂▅  │
-│ ip       1│                                                                          │▁   ▁▄▇██▄ │
-│          1│                                                                          │█▇▄▇██████ │
-│ user     a│  any key closes                                                          │           │
-│ workdir  /╰──────────────────────────────────────────────────────────────────────────╯       ▁▃▃ │
-│ ports    3000->3000/tcp                                           ▄▆█████▆▄▃▁▃▄▆█████▆▄▃▁▃▄▆████ │
+│           │  i           details bottom/right/off   a           show stopped         │           │
+│           │  p           prune                                                       │           │
+│           │  q           quit                       Images · Volumes                 │           │
+╰───────────│                                         d           remove if unused     │───── 1/5 ─╯
+╭─ api ─────│  Sort                                                                    │───────────╮
+│ image    a│  P           cpu                                                         │6%         │
+│ status   U│  M           mem                                                         │        ▄  │
+│ command  /│  N           name                                                        │      ▄██  │
+│ ip       1│  S           size                                                        │▅▁ ▁▅█████ │
+│          1│  T           started / created                                           │██▅███████ │
+│ user     a│                                                                          │           │
+│ workdir  /│  any key closes                                                          │       ▁▃▃ │
+│ ports    3╰──────────────────────────────────────────────────────────────────────────╯▄▃▁▃▄▆████ │
 │ mounts   /home/me/.lo…/proxy.conf:/etc/acme/proxy/proxy.conf:ro   ██████████████████████████████ │
-│          /home/me/work/api:/app                                   NET ↓ 75M  ↑ 10M   PIDS 12     │
-│          bundle:/usr/local/bundle                                                                │
+│          /home/me/work/api:/app                                   NET  ↓ 75M / ↑ 10M   PIDS 12   │
+│          bundle:/usr/local/bundle                                 DISK r 4.0M / w 0B             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
  s stop  r restart  d remove  l logs  e shell  │  / filter  a running  p prune       ? help  q quit

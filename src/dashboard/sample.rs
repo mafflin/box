@@ -6,11 +6,17 @@ use super::app::{Action, App, Snapshot};
 use crate::docker::{Container, Image, Mount, Stats, Volume};
 use crate::theme::Theme;
 
-const MIB: u64 = 1024 * 1024;
+const KIB: u64 = 1024;
+const MIB: u64 = 1024 * KIB;
 /// When the sample's statuses were taken, in seconds since the epoch
 const NOW: i64 = 1_794_000_000;
 const HOUR: i64 = 3600;
 const GIB: u64 = 1024 * MIB;
+/// What each image runs, which its containers run too
+const API_COMMAND: [&str; 3] = ["/app/bin/docker-entrypoint", "./bin/rails", "server"];
+const POSTGRES_COMMAND: [&str; 2] = ["docker-entrypoint.sh", "postgres"];
+const NGINX_COMMAND: [&str; 4] = ["/docker-entrypoint.sh", "nginx", "-g", "daemon off;"];
+const RUBY_COMMAND: [&str; 1] = ["irb"];
 
 fn id(seed: char) -> String {
     seed.to_string().repeat(64)
@@ -36,6 +42,11 @@ fn bind(source: &str, destination: &str, rw: bool) -> Mount {
     }
 }
 
+/// What a container or image runs, quoted as a shell takes it
+fn command(args: &[&str]) -> String {
+    crate::format::command(&args.iter().map(ToString::to_string).collect::<Vec<_>>())
+}
+
 fn running(name: &str, image: &str, image_seed: char, status: &str, up: i64) -> Container {
     Container {
         started_at: NOW - up,
@@ -51,6 +62,7 @@ fn running(name: &str, image: &str, image_seed: char, status: &str, up: i64) -> 
 
 fn containers() -> Vec<Container> {
     let api = Container {
+        command: command(&API_COMMAND),
         user: "app".into(),
         workdir: "/app".into(),
         ips: vec!["172.18.0.3".into(), "172.19.0.4".into()],
@@ -74,12 +86,14 @@ fn containers() -> Vec<Container> {
         )
     };
     let db = Container {
+        command: command(&POSTGRES_COMMAND),
         ips: vec!["172.18.0.4".into()],
         ports: vec!["5432/tcp".into()],
         mounts: vec![volume_mount("pgdata", "/var/lib/postgresql/data")],
         ..running("db", "postgres:16", 'b', "Up 2 days", 48 * HOUR)
     };
     let web = Container {
+        command: command(&NGINX_COMMAND),
         workdir: "/usr/share/nginx/html".into(),
         ips: vec!["172.18.0.2".into()],
         ports: vec!["8080->80/tcp".into(), "8443->443/tcp".into()],
@@ -90,6 +104,7 @@ fn containers() -> Vec<Container> {
         ..running("web", "nginx:1.27-alpine", 'c', "Up 3 days", 72 * HOUR)
     };
     let console = Container {
+        command: command(&RUBY_COMMAND),
         workdir: "/app".into(),
         tty: true,
         open_stdin: true,
@@ -97,6 +112,7 @@ fn containers() -> Vec<Container> {
         ..running("console", "ruby:3.3-slim", 'd', "Up 5 hours", 5 * HOUR)
     };
     let worker = Container {
+        command: command(&["/app/bin/docker-entrypoint", "./bin/jobs"]),
         user: "app".into(),
         workdir: "/app".into(),
         state: "exited".into(),
@@ -129,11 +145,8 @@ fn images() -> Vec<Image> {
         configured: true,
         ..Image::default()
     };
-    let args = |args: &[&str]| {
-        crate::format::command(&args.iter().map(ToString::to_string).collect::<Vec<_>>())
-    };
     let api = Image {
-        command: args(&["/app/bin/docker-entrypoint", "./bin/rails", "server"]),
+        command: command(&API_COMMAND),
         user: "app".into(),
         workdir: "/app".into(),
         ports: vec!["3000/tcp".into()],
@@ -159,7 +172,7 @@ fn images() -> Vec<Image> {
         api,
         Image {
             platform: "linux/amd64".into(),
-            command: args(&["docker-entrypoint.sh", "postgres"]),
+            command: command(&POSTGRES_COMMAND),
             ports: vec!["5432/tcp".into()],
             ..image(
                 "postgres",
@@ -173,7 +186,7 @@ fn images() -> Vec<Image> {
         },
         Image {
             platform: "linux/arm64/v8".into(),
-            command: args(&["/docker-entrypoint.sh", "nginx", "-g", "daemon off;"]),
+            command: command(&NGINX_COMMAND),
             ports: vec!["80/tcp".into()],
             ..image(
                 "nginx",
@@ -186,7 +199,7 @@ fn images() -> Vec<Image> {
             )
         },
         Image {
-            command: args(&["irb"]),
+            command: command(&RUBY_COMMAND),
             ..image(
                 "ruby",
                 "3.3-slim",
@@ -235,7 +248,7 @@ pub fn snapshot() -> Snapshot {
 }
 
 /// Usage that ends at the given values, with a wavy history before: up and down every `WAVE` steps
-fn stats(app: &mut App, id: &str, cpu: f64, memory: u64, memory_limit: u64) {
+fn stats(app: &mut App, id: &str, cpu: f64, memory: u64, memory_limit: u64, network: (u64, u64)) {
     /// Steps from the bottom of the wave to its top
     const WAVE: u32 = 6;
     for step in 0..80_u32 {
@@ -257,7 +270,7 @@ fn stats(app: &mut App, id: &str, cpu: f64, memory: u64, memory_limit: u64) {
                 memory * u64::from(9 * WAVE + wave) / u64::from(10 * WAVE)
             },
             memory_limit,
-            network: (75 * MIB, 10 * MIB),
+            network,
             block: (4 * MIB, 0),
             pids: 12,
         };
@@ -268,9 +281,37 @@ fn stats(app: &mut App, id: &str, cpu: f64, memory: u64, memory_limit: u64) {
 pub fn app() -> App {
     let mut app = App::new(Theme::default(), Instant::now());
     app.update(Action::Snapshot(Ok(snapshot())), Instant::now());
-    stats(&mut app, "api-id", 18.0, 649 * MIB, 2 * GIB);
-    stats(&mut app, "db-id", 6.0, 311 * MIB, 16 * GIB);
-    stats(&mut app, "web-id", 1.5, 14 * MIB, 512 * MIB);
-    stats(&mut app, "console-id", 0.1, 35 * MIB, 16 * GIB);
+    stats(
+        &mut app,
+        "api-id",
+        18.0,
+        649 * MIB,
+        2 * GIB,
+        (75 * MIB, 10 * MIB),
+    );
+    stats(
+        &mut app,
+        "db-id",
+        6.0,
+        311 * MIB,
+        16 * GIB,
+        (2 * GIB, 640 * KIB),
+    );
+    stats(
+        &mut app,
+        "web-id",
+        1.5,
+        14 * MIB,
+        512 * MIB,
+        (310 * MIB, 1200 * MIB),
+    );
+    stats(
+        &mut app,
+        "console-id",
+        0.1,
+        35 * MIB,
+        16 * GIB,
+        (41 * KIB, 14 * KIB),
+    );
     app
 }

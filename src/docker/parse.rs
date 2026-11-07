@@ -65,6 +65,8 @@ pub struct Container {
     pub image_id: String,
     pub user: String,
     pub workdir: String,
+    /// What it started, after `docker run`'s overrides, as one line
+    pub command: String,
     /// As docker ps shows it, like `Up 2 days (healthy)`
     pub status: String,
     /// `running`, `exited`, `created`, `paused`, `restarting`, `removing` or `dead`
@@ -262,6 +264,11 @@ struct Inspect {
     name: String,
     #[serde(default)]
     image: String,
+    /// What it started: the entrypoint's or command's first part, then the rest
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    args: Option<Vec<String>>,
     #[serde(default)]
     config: Config,
     #[serde(default)]
@@ -418,6 +425,7 @@ fn container(line: PsLine, details: &Inspect) -> Container {
         image_id: details.image.clone(),
         user: plain(&details.config.user),
         workdir: plain(&details.config.working_dir),
+        command: container_command(details),
         status: line.status,
         state: details.state.status.clone(),
         exit_code: details.state.exit_code,
@@ -429,6 +437,12 @@ fn container(line: PsLine, details: &Inspect) -> Container {
         ports: ports(&details.network_settings),
         mounts: details.mounts.iter().flatten().map(plain_mount).collect(),
     }
+}
+
+/// `Path`, then `Args`, as one line; empty when docker gives neither
+fn container_command(details: &Inspect) -> String {
+    let path = Some(&details.path).filter(|path| !path.is_empty());
+    command_line(path.into_iter().chain(details.args.iter().flatten()))
 }
 
 /// The container's address in each network it's on
@@ -550,13 +564,17 @@ fn platform(details: &ImageInspect) -> String {
 
 /// The entrypoint, then the command, as one line
 fn command(config: &ImageConfig) -> String {
-    let args: Vec<String> = [&config.entrypoint, &config.cmd]
-        .into_iter()
-        .flatten()
-        .flatten()
-        .cloned()
-        .collect();
-    plain(&format::command(&args))
+    command_line(
+        [&config.entrypoint, &config.cmd]
+            .into_iter()
+            .flatten()
+            .flatten(),
+    )
+}
+
+/// Arguments quoted as a shell takes them, on one line that can't change the terminal
+fn command_line<'a>(args: impl Iterator<Item = &'a String>) -> String {
+    plain(&format::command(&args.cloned().collect::<Vec<_>>()))
 }
 
 /// Like `80/tcp`

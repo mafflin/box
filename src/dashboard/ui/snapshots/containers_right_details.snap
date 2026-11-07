@@ -5,15 +5,15 @@ expression: screen
 ---
   Containers 5   Images 6   Volumes 4                                                                          sort started ▼   showing all
 ╭─ Containers ──────────────────────────────────────────────────────────────────────────────╮╭─ console ───────────────────────────────────╮
-│ NAME     IMAGE              STATUS ▼    CPU%   MEM    NET I/O  PIDS  PORTS                ││ image    ruby:3.3-slim                      │
-│ api      acme/api:dev       Up 40 min…  18.0  649M  75M / 10M    12  3000->3000/tcp       ││ status   Up 5 hours                         │
-│ console  ruby:3.3-slim      Up 5 hours   0.1   35M  75M / 10M    12                       ││ tty      interactive (-it) · no logs        │
-│ db       postgres:16        Up 2 days    6.0  311M  75M / 10M    12  5432/tcp             ││ ip       172.18.0.8                         │
-│ web      nginx:1.27-alpine  Up 3 days    1.5   14M  75M / 10M    12  8080->80/tcp 8443->… ││ user     root                               │
-│ worker   acme/api:dev       Exited (0…     —     —          —     —                       ││ workdir  /app                               │
+│ NAME     IMAGE             STATUS ▼    CPU%   MEM          NET I/O  PIDS  PORTS           ││ image    ruby:3.3-slim                      │
+│ api      acme/api:dev      Up 40 min…  18.0  649M  ↓  75M / ↑  10M    12  3000->3000/tcp  ││ status   Up 5 hours                         │
+│ console  ruby:3.3-slim     Up 5 hours   0.1   35M  ↓  41K / ↑  14K    12                  ││ tty      interactive (-it) · no logs        │
+│ db       postgres:16       Up 2 days    6.0  311M  ↓ 2.0G / ↑ 640K    12  5432/tcp        ││ command  irb                                │
+│ web      nginx:1.27-alpi…  Up 3 days    1.5   14M  ↓ 310M / ↑ 1.2G    12  8080->80/tcp 8… ││ ip       172.18.0.8                         │
+│ worker   acme/api:dev      Exited (0…     —     —                —     —                  ││ user     root                               │
+│                                                                                           ││ workdir  /app                               │
 │                                                                                           ││ ports    —                                  │
 │                                                                                           ││ mounts   —                                  │
-│                                                                                           ││                                             │
 │                                                                                           ││                                             │
 │                                                                                           ││                                             │
 │                                                                                           ││                                             │
@@ -26,10 +26,10 @@ expression: screen
 │                                                                                           ││                                             │
 │                                                                                           ││ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 │                                                                                           ││ MEM 35M / 16G                               │
-│                                                                                           ││      ▁           ▁           ▁           ▁▁ │
-│                                                                                           ││   ▃▅▇█▇▅▃     ▃▅▇█▇▅▃     ▃▅▇█▇▅▃     ▃▅▇██ │
-│                                                                                           ││ ▆█████████▆▄▆█████████▆▄▆█████████▆▄▆██████ │
+│                                                                                           ││     ▁▃▁         ▁▃▁         ▁▃▁         ▁▃▃ │
+│                                                                                           ││ ▃▄▆█████▆▄▃▁▃▄▆█████▆▄▃▁▃▄▆█████▆▄▃▁▃▄▆████ │
 │                                                                                           ││ ███████████████████████████████████████████ │
-│                                                                                           ││ NET ↓ 75M  ↑ 10M   PIDS 12                  │
+│                                                                                           ││ NET  ↓ 41K / ↑ 14K   PIDS 12                │
+│                                                                                           ││ DISK r 4.0M / w 0B                          │
 ╰───────────────────────────────────────────────────────────────────────────────────── 2/5 ─╯╰─────────────────────────────────────────────╯
  s stop  r restart  d remove  l logs  e shell  │  / filter  a running  i details  P M N T sort  tab view  p prune            details: right

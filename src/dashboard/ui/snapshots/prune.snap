@@ -5,12 +5,12 @@ expression: screen
 ---
   Containers 5   Images 6   Volumes 4                                  sort started ▼   showing all
 ╭─ Containers ─────────────────────────────────────────────────────────────────────────────────────╮
-│ NAME     IMAGE              STATUS ▼     CPU%   MEM    NET I/O  PIDS  PORTS                      │
-│ api      acme/api:dev       Up 40 minu…  18.0  649M  75M / 10M    12  3000->3000/tcp             │
-│ console  ruby:3.3-slim      Up 5 hours    0.1   35M  75M / 10M    12                             │
-│ db       postgres:16        Up 2 days     6.0  311M  75M / 10M    12  5432/tcp                   │
-│ web      nginx:1.27-alpine  Up 3 days     1.5   14M  75M / 10M    12  8080->80/tcp 8443->443/tcp │
-│ worker   acme/api:dev       Exited (0)…     —     —          —     —                             │
+│ NAME     IMAGE              STATUS ▼    CPU%   MEM          NET I/O  PIDS  PORTS                 │
+│ api      acme/api:dev       Up 40 min…  18.0  649M  ↓  75M / ↑  10M    12  3000->3000/tcp        │
+│ console  ruby:3.3-slim      Up 5 hours   0.1   35M  ↓  41K / ↑  14K    12                        │
+│ db       postgres:16        Up 2 days    6.0  311M  ↓ 2.0G / ↑ 640K    12  5432/tcp              │
+│ web      nginx:1.27-alpine  Up 3 days    1.5   14M  ↓ 310M / ↑ 1.2G    12  8080->80/tcp 8443->4… │
+│ worker   acme/api:dev       Exited (0…     —     —                —     —                        │
 │                                                                                                  │
 │                     ╭─ Prune ──────────────────────────────────────────────╮                     │
 │                     │                                                      │                     │
@@ -18,18 +18,18 @@ expression: screen
 │                     │   [x] unused volumes         1                       │                     │
 │                     │   [x] dangling images        1  412MB                │                     │
 │                     │                                                      │                     │
-│                     │  runs in order: containers → volumes → images        │                     │
-╰─────────────────────│                                                      │─────────────── 1/5 ─╯
+╰─────────────────────│  runs in order: containers → volumes → images        │─────────────── 1/5 ─╯
 ╭─ api ───────────────│                                                      │─────────────────────╮
-│ image    acme/api:de│  ↑↓ move  space toggle  enter run  esc cancel        │  peak 30.6%         │
-│ status   Up 40 minut╰──────────────────────────────────────────────────────╯     ▂▅▂         ▂▅  │
-│ ip       172.18.0.3                                               ▁▄▇███▇▄▁   ▁▄▇███▇▄▁   ▁▄▇██▄ │
-│          172.19.0.4                                               █████████▇▄▇█████████▇▄▇██████ │
+│ image    acme/api:de│                                                      │  peak 30.6%         │
+│ status   Up 40 minut│  ↑↓ move  space toggle  enter run  esc cancel        │      ▄           ▄  │
+│ command  /app/bin/do╰──────────────────────────────────────────────────────╯    ▄███▄       ▄██  │
+│ ip       172.18.0.3                                               ▅███████▅▁ ▁▅███████▅▁ ▁▅█████ │
+│          172.19.0.4                                               ██████████▅███████████▅███████ │
 │ user     app                                                      MEM 649M / 2.0G                │
 │ workdir  /app                                                        ▁▃▁         ▁▃▁         ▁▃▃ │
 │ ports    3000->3000/tcp                                           ▄▆█████▆▄▃▁▃▄▆█████▆▄▃▁▃▄▆████ │
 │ mounts   /home/me/.lo…/proxy.conf:/etc/acme/proxy/proxy.conf:ro   ██████████████████████████████ │
-│          /home/me/work/api:/app                                   NET ↓ 75M  ↑ 10M   PIDS 12     │
-│          bundle:/usr/local/bundle                                                                │
+│          /home/me/work/api:/app                                   NET  ↓ 75M / ↑ 10M   PIDS 12   │
+│          bundle:/usr/local/bundle                                 DISK r 4.0M / w 0B             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
  s stop  r restart  d remove  l logs  e shell  │  / filter  a running  p prune       ? help  q quit

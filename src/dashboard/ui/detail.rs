@@ -8,7 +8,10 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 
 use super::table::{fraction, state_color};
-use super::{NO_VALUE, bold, fg, fill, head, padded, put, put_line, rounded_box, size};
+use super::{
+    DISK_MARKS, NETWORK_MARKS, NO_VALUE, bold, fg, fill, head, padded, put, put_line, rounded_box,
+    size,
+};
 use crate::dashboard::app::{App, History, View};
 use crate::dashboard::keys::{self, names};
 use crate::docker::{Container, Image, Stats, Volume};
@@ -50,6 +53,10 @@ const MEMORY_FLOOR: f64 = 0.9;
 const MEMORY_HEADROOM: f64 = 1.05;
 /// The rows the graphs need for the network and PIDs line under them
 const MIN_USAGE_LINE_HEIGHT: u16 = 6;
+/// And for the disk line under that, which leaves each graph two rows
+const MIN_DISK_LINE_HEIGHT: u16 = 8;
+/// `NET` and `DISK` as wide, so their values line up
+const USAGE_LABEL_WIDTH: usize = 5;
 
 pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App, bottom: bool) {
     let theme = app.theme;
@@ -74,8 +81,13 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App, bottom: bool) {
     match app.view {
         View::Containers if bottom => draw_container_wide(buf, inner, app, &app.containers[row]),
         View::Containers => draw_container_tall(buf, inner, app, &app.containers[row]),
-        View::Images => draw_lines(buf, inner, &image_lines(app, &app.images[row]), &theme),
-        View::Volumes => draw_lines(buf, inner, &volume_lines(app, &app.volumes[row]), &theme),
+        View::Images => draw_lines(buf, inner, &image_lines(app, &app.images[row]).rows, &theme),
+        View::Volumes => draw_lines(
+            buf,
+            inner,
+            &volume_lines(app, &app.volumes[row]).rows,
+            &theme,
+        ),
     }
 }
 
@@ -87,9 +99,11 @@ pub fn height(app: &mut App) -> u16 {
     };
     let lines = match app.view {
         // Its mounts take a line each however wide they are
-        View::Containers => container_lines(app, &app.containers[row], usize::MAX).len(),
-        View::Images => image_lines(app, &app.images[row]).len(),
-        View::Volumes => volume_lines(app, &app.volumes[row]).len(),
+        View::Containers => container_lines(app, &app.containers[row], usize::MAX)
+            .rows
+            .len(),
+        View::Images => image_lines(app, &app.images[row]).rows.len(),
+        View::Volumes => volume_lines(app, &app.volumes[row]).rows.len(),
     };
     size(lines).saturating_add(2)
 }
@@ -105,12 +119,7 @@ fn title(app: &App, row: usize) -> String {
 
 /// In a pane at the bottom: the text on the left, the graphs beside it
 fn draw_container_wide(buf: &mut Buffer, area: Rect, app: &App, container: &Container) {
-    let longest = container_lines(app, container, usize::MAX)
-        .iter()
-        .take(usize::from(area.height))
-        .map(Line::width)
-        .max()
-        .unwrap_or(0);
+    let longest = container_lines(app, container, usize::MAX).widest(usize::from(area.height));
     let left = text_width(longest, area.width);
     let lines = container_lines(app, container, usize::from(left));
     draw_lines(
@@ -119,7 +128,7 @@ fn draw_container_wide(buf: &mut Buffer, area: Rect, app: &App, container: &Cont
             width: left,
             ..area
         },
-        &lines,
+        &lines.rows,
         &app.theme,
     );
     let graphs = Rect {
@@ -132,7 +141,7 @@ fn draw_container_wide(buf: &mut Buffer, area: Rect, app: &App, container: &Cont
 
 /// In a pane on the right: the text on top, the graphs under it when there's room
 fn draw_container_tall(buf: &mut Buffer, area: Rect, app: &App, container: &Container) {
-    let lines = container_lines(app, container, usize::from(area.width));
+    let lines = container_lines(app, container, usize::from(area.width)).rows;
     let graphs = graphs_height(lines.len(), area.height);
     let text_height = area.height - if graphs > 0 { graphs + 1 } else { 0 };
     draw_lines(
@@ -179,16 +188,38 @@ fn graphs_height(text_lines: usize, height: u16) -> u16 {
 
 /// `label    value` lines, a list's items under each other, `—` for an empty list
 struct Lines {
-    lines: Vec<Line<'static>>,
+    rows: Vec<Line<'static>>,
+    /// The lines cut at the text's edge rather than widening it, by index
+    unmeasured: Vec<usize>,
     theme: Theme,
 }
 
 impl Lines {
     fn new(theme: Theme) -> Self {
         Self {
-            lines: Vec::new(),
+            rows: Vec::new(),
+            unmeasured: Vec::new(),
             theme,
         }
+    }
+
+    /// What it runs, `—` for nothing; often long, so it's cut rather than widening the text
+    fn command(&mut self, command: &str) {
+        self.unmeasured.push(self.rows.len());
+        let command = Some(command).filter(|command| !command.is_empty());
+        self.list("command", command, self.theme.text);
+    }
+
+    /// The widest of the first `count` lines, leaving out those cut to fit
+    fn widest(&self, count: usize) -> usize {
+        self.rows
+            .iter()
+            .enumerate()
+            .take(count)
+            .filter(|(index, _)| !self.unmeasured.contains(index))
+            .map(|(_, line)| line.width())
+            .max()
+            .unwrap_or(0)
     }
 
     /// One value
@@ -241,21 +272,17 @@ impl Lines {
     /// A blank line, then that pruning removes it
     fn prune_hint(&mut self) {
         let theme = self.theme;
-        self.lines.push(Line::default());
-        self.lines.push(Line::from(vec![
+        self.rows.push(Line::default());
+        self.rows.push(Line::from(vec![
             Span::styled("dangling · removed by ", fg(theme.dim)),
             Span::styled(names(&[keys::PRUNE]), bold(theme.accent)),
             Span::styled(" prune", fg(theme.dim)),
         ]));
     }
 
-    fn into_lines(self) -> Vec<Line<'static>> {
-        self.lines
-    }
-
     fn add(&mut self, label: &str, items: Vec<Vec<Span<'static>>>) {
         if items.is_empty() {
-            self.lines.push(Line::from(vec![
+            self.rows.push(Line::from(vec![
                 self.label(label),
                 Span::styled(NO_VALUE, fg(self.theme.dim)),
             ]));
@@ -263,7 +290,7 @@ impl Lines {
         for (i, item) in items.into_iter().enumerate() {
             let mut spans = vec![self.label(if i == 0 { label } else { "" })];
             spans.extend(item);
-            self.lines.push(Line::from(spans));
+            self.rows.push(Line::from(spans));
         }
     }
 
@@ -273,7 +300,7 @@ impl Lines {
 }
 
 /// Mounts fit in `width`
-fn container_lines(app: &App, container: &Container, width: usize) -> Vec<Line<'static>> {
+fn container_lines(app: &App, container: &Container, width: usize) -> Lines {
     let theme = app.theme;
     let mut lines = Lines::new(theme);
     lines.text("image", &container.image, theme.image);
@@ -286,6 +313,7 @@ fn container_lines(app: &App, container: &Container, width: usize) -> Vec<Line<'
         let tty = format!("interactive ({}) · no logs", container.interactive_flags());
         lines.text("tty", tty, theme.yellow);
     }
+    lines.command(&container.command);
     lines.list("ip", &container.ips, theme.ip);
     lines.text("user", container.shown_user(), theme.user);
     lines.text("workdir", container.shown_workdir(), theme.workdir);
@@ -297,10 +325,10 @@ fn container_lines(app: &App, container: &Container, width: usize) -> Vec<Line<'
         mount.prefix + &mount.highlight + &mount.suffix
     });
     lines.list("mounts", mounts, theme.text);
-    lines.into_lines()
+    lines
 }
 
-fn image_lines(app: &App, image: &Image) -> Vec<Line<'static>> {
+fn image_lines(app: &App, image: &Image) -> Lines {
     let theme = app.theme;
     let mut lines = Lines::new(theme);
     lines.text("id", &image.id, theme.id);
@@ -322,18 +350,17 @@ fn image_lines(app: &App, image: &Image) -> Vec<Line<'static>> {
     if image.is_dangling() && users.is_empty() {
         // What's left of an old build, which pruning removes, so what it runs doesn't matter
         lines.prune_hint();
-        return lines.into_lines();
+        return lines;
     }
     if image.configured {
-        let command = Some(&image.command).filter(|command| !command.is_empty());
-        lines.list("command", command, theme.text);
+        lines.command(&image.command);
         lines.list("ports", &image.ports, theme.ports);
         lines.text("user", image.shown_user(), theme.user);
         lines.text("workdir", image.shown_workdir(), theme.workdir);
     }
     lines.optional("source", &image.source, theme.text);
     lines.optional("version", version(image), theme.text);
-    lines.into_lines()
+    lines
 }
 
 /// The references of every image with its ID, sorted
@@ -358,7 +385,7 @@ fn version(image: &Image) -> String {
     }
 }
 
-fn volume_lines(app: &App, volume: &Volume) -> Vec<Line<'static>> {
+fn volume_lines(app: &App, volume: &Volume) -> Lines {
     let theme = app.theme;
     let mut lines = Lines::new(theme);
     lines.text("name", &volume.name, theme.name);
@@ -372,7 +399,7 @@ fn volume_lines(app: &App, volume: &Volume) -> Vec<Line<'static>> {
     if users.is_empty() {
         lines.prune_hint();
     }
-    lines.into_lines()
+    lines
 }
 
 /// Where the container mounts the volume
@@ -429,7 +456,7 @@ fn cut<'a>(line: &Line<'a>, width: usize) -> Line<'a> {
     Line::from(spans)
 }
 
-/// CPU and memory over time, with network and PIDs under them when there's room
+/// CPU and memory over time, with network and PIDs under them when there's room, then disk
 fn draw_graphs(buf: &mut Buffer, area: Rect, app: &App, container: &Container) {
     if area.width < MIN_GRAPH_WIDTH || area.height < MIN_GRAPH_HEIGHT {
         return;
@@ -443,8 +470,18 @@ fn draw_graphs(buf: &mut Buffer, area: Rect, app: &App, container: &Container) {
     let memory: Vec<f64> = recent(&history.memory, width).map(format::kib).collect();
     // Dim without current stats
     let color = |color: Color| if stats.is_some() { color } else { theme.dim };
-    let usage_line = area.height >= MIN_USAGE_LINE_HEIGHT;
-    let graph_height = ((area.height - 2 - u16::from(usage_line)) / 2).max(1);
+    let (network, disk) = usage_labels(&theme, stats);
+    let usage = if area.height >= MIN_DISK_LINE_HEIGHT {
+        vec![network, disk]
+    } else if area.height >= MIN_USAGE_LINE_HEIGHT {
+        vec![network]
+    } else {
+        Vec::new()
+    };
+    // The graphs' rows without their labels, an odd one to the CPU's
+    let rows = area.height.saturating_sub(2 + size(usage.len()));
+    let memory_height = (rows / 2).max(1);
+    let cpu_height = (rows - memory_height).max(1);
 
     let peak = cpu.iter().copied().fold(0.0, f64::max);
     let cpu = Graph {
@@ -453,22 +490,16 @@ fn draw_graphs(buf: &mut Buffer, area: Rect, app: &App, container: &Container) {
         range: cpu_range(peak),
         color: color(theme.cpu),
     };
-    let area = labeled_graph(buf, area, graph_height, &cpu, &theme);
+    let area = labeled_graph(buf, area, cpu_height, &cpu, &theme);
     let memory = Graph {
         label: memory_label(&theme, stats),
         values: &memory,
         range: memory_range(&memory),
         color: color(theme.memory),
     };
-    let area = labeled_graph(buf, area, graph_height, &memory, &theme);
-    if usage_line && area.height > 0 {
-        put_line(
-            buf,
-            area.x,
-            area.y,
-            &usage_label(&theme, stats),
-            area.right(),
-        );
+    let area = labeled_graph(buf, area, memory_height, &memory, &theme);
+    for (y, line) in (area.y..area.bottom()).zip(&usage) {
+        put_line(buf, area.x, y, line, area.right());
     }
 }
 
@@ -509,24 +540,38 @@ fn memory_label(theme: &Theme, stats: Option<&Stats>) -> Line<'static> {
     ])
 }
 
-/// `NET ↓ 75M  ↑ 10M   PIDS 12`
-fn usage_label(theme: &Theme, stats: Option<&Stats>) -> Line<'static> {
-    let (network, pids) = stats.map_or_else(
-        || (NO_VALUE.to_string(), NO_VALUE.to_string()),
+/// `NET  ↓ 75M / ↑ 10M   PIDS 12` and `DISK r 4.0M / w 0B`, each narrower than the narrowest graph
+fn usage_labels(theme: &Theme, stats: Option<&Stats>) -> (Line<'static>, Line<'static>) {
+    let pair = |(first, second): (u64, u64), [first_mark, second_mark]: [&str; 2]| {
+        format!(
+            "{first_mark} {} / {second_mark} {}",
+            compact_bytes(first),
+            compact_bytes(second)
+        )
+    };
+    let (network, disk, pids) = stats.map_or_else(
+        || {
+            let none = || NO_VALUE.to_string();
+            (none(), none(), none())
+        },
         |stats| {
-            let (received, sent) = stats.network;
             (
-                format!("↓ {}  ↑ {}", compact_bytes(received), compact_bytes(sent)),
+                pair(stats.network, NETWORK_MARKS),
+                pair(stats.block, DISK_MARKS),
                 stats.pids.to_string(),
             )
         },
     );
-    Line::from(vec![
-        Span::styled("NET ", fg(theme.muted)),
-        Span::styled(network, fg(theme.text)),
-        Span::styled("   PIDS ", fg(theme.muted)),
-        Span::styled(pids, fg(theme.text)),
-    ])
+    let label = |label: &str| Span::styled(format!("{label:<USAGE_LABEL_WIDTH$}"), fg(theme.muted));
+    (
+        Line::from(vec![
+            label("NET"),
+            Span::styled(network, fg(theme.text)),
+            Span::styled("   PIDS ", fg(theme.muted)),
+            Span::styled(pids, fg(theme.text)),
+        ]),
+        Line::from(vec![label("DISK"), Span::styled(disk, fg(theme.text))]),
+    )
 }
 
 /// From 0 to a little over the peak, at least `MIN_CPU_TOP`

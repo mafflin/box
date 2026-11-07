@@ -57,7 +57,7 @@ fn bottom_details_grow_to_fit() {
     assert!(shown.contains("bundle:/usr/local/bundle"));
     assert!(!shown.contains(" more"));
     // Never more than half
-    assert!(screen(&mut app, 80, 24).contains("… 2 more"));
+    assert!(screen(&mut app, 80, 24).contains("… 3 more"));
 }
 
 #[test]

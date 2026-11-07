@@ -5,7 +5,8 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 
 use super::{
-    NO_VALUE, bold, fg, fill, fit, put, put_on_border, rounded_box, size, sort_arrow, width,
+    NETWORK_MARKS, NO_VALUE, bold, fg, fill, fit, put, put_on_border, rounded_box, size,
+    sort_arrow, width,
 };
 use crate::dashboard::app::{App, Pending, Sort, SortKey, View};
 use crate::dashboard::keys;
@@ -291,11 +292,12 @@ fn containers(app: &App, rows: &[usize]) -> (Vec<Column>, Vec<bool>) {
     let mut pids = Column::new("PIDS", None).right();
     let mut ports = Column::new("PORTS", None).flex(3, 8);
 
+    let network_widths = network_widths(app, rows);
     for container in &app.containers {
         name.cells.push((container.name.clone(), fg(theme.name)));
         image.cells.push((container.image.clone(), fg(theme.image)));
         status.cells.push(status_cell(app, container));
-        let usage = usage_cells(&theme, app.container_stats(container));
+        let usage = usage_cells(&theme, app.container_stats(container), network_widths);
         for (column, cell) in [&mut cpu, &mut memory, &mut network, &mut pids]
             .into_iter()
             .zip(usage)
@@ -316,8 +318,25 @@ fn containers(app: &App, rows: &[usize]) -> (Vec<Column>, Vec<bool>) {
     (columns, dimmed)
 }
 
+/// The widest received and sent amounts of the shown rows, so the network's arrows line up
+fn network_widths(app: &App, rows: &[usize]) -> (usize, usize) {
+    rows.iter()
+        .filter_map(|&row| app.container_stats(&app.containers[row]))
+        .fold((0, 0), |(received, sent), stats| {
+            let (now_received, now_sent) = stats.network;
+            (
+                received.max(width(&compact_bytes(now_received))),
+                sent.max(width(&compact_bytes(now_sent))),
+            )
+        })
+}
+
 /// CPU, memory, network and PIDs, colored by how close they are to the limit; `—` without stats
-fn usage_cells(theme: &Theme, stats: Option<&Stats>) -> [Cell; 4] {
+fn usage_cells(
+    theme: &Theme,
+    stats: Option<&Stats>,
+    (received_width, sent_width): (usize, usize),
+) -> [Cell; 4] {
     let Some(stats) = stats else {
         return std::array::from_fn(|_| (NO_VALUE.to_string(), fg(theme.dim)));
     };
@@ -333,7 +352,13 @@ fn usage_cells(theme: &Theme, stats: Option<&Stats>) -> [Cell; 4] {
             fg(theme.level(memory, theme.text)),
         ),
         (
-            format!("{} / {}", compact_bytes(received), compact_bytes(sent)),
+            format!(
+                "{} {:>received_width$} / {} {:>sent_width$}",
+                NETWORK_MARKS[0],
+                compact_bytes(received),
+                NETWORK_MARKS[1],
+                compact_bytes(sent)
+            ),
             fg(theme.text),
         ),
         (stats.pids.to_string(), fg(theme.text)),
