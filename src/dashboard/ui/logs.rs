@@ -1,50 +1,30 @@
 //! A container's logs, following new lines until paused
 
+use std::ops::Range;
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::style::Color;
 use ratatui::text::{Line, Span};
 
-use super::{badge, bold, fg, put, put_line, rounded_box};
-use crate::dashboard::app::{App, Level};
+use super::{badge, bold, fg, padded, put, put_line, put_on_border, rounded_box};
+use crate::dashboard::app::{App, Level, LogLine, Logs};
+use crate::theme::Theme;
+
+/// Between a line's time and its text
+const TIME_GAP: &str = "  ";
 
 pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
     let theme = app.theme;
     let Some(logs) = &app.logs else { return };
-    let inner = rounded_box(
-        buf,
-        area,
-        theme.border,
-        &format!("logs · {}", logs.name),
-        fg(theme.text),
-    );
-    let (state, color) = if logs.ended {
-        (" ■ ended ", theme.dim)
-    } else if logs.view.is_none() {
-        (" ● following ", theme.green)
-    } else {
-        (" ‖ paused ", theme.yellow)
-    };
-    let width = u16::try_from(state.chars().count()).unwrap_or(0);
-    put(
-        buf,
-        area.right().saturating_sub(2 + width),
-        area.y,
-        state,
-        bold(color),
-        area.right() - 1,
-    );
+    let title = format!("logs · {}", logs.name);
+    let inner = padded(rounded_box(buf, area, theme.border, &title, fg(theme.text)));
+    let (state, color) = state(logs, &theme);
+    put_on_border(buf, area, area.y, state, bold(color));
 
-    let inner = Rect {
-        x: inner.x + 1,
-        width: inner.width.saturating_sub(2),
-        ..inner
-    };
     let height = usize::from(inner.height);
-    let length = logs.lines.len();
-    let end = logs.view.unwrap_or(length).min(length);
-    let start = end.saturating_sub(height);
-
-    if length == 0 {
+    let shown = shown(logs, height);
+    if logs.lines.is_empty() {
         let message = if logs.ended {
             "no output"
         } else {
@@ -52,36 +32,48 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
         };
         put(buf, inner.x, inner.y, message, fg(theme.dim), inner.right());
     }
-    for (i, line) in logs.lines.range(start..end).enumerate() {
-        let y = inner.y + u16::try_from(i).unwrap_or(0);
-        let color = match line.level {
-            Level::Error => theme.red,
-            Level::Warning => theme.yellow,
-            Level::Info => theme.text,
-            Level::Debug => theme.dim,
-        };
-        let mut spans = Vec::new();
-        if !line.time.is_empty() {
-            spans.push(Span::styled(line.time.clone(), fg(theme.dim)));
-            spans.push(Span::raw("  "));
-        }
-        spans.push(Span::styled(line.text.clone(), fg(color)));
-        put_line(buf, inner.x, y, &Line::from(spans), inner.right());
+    for (line, y) in logs.lines.range(shown.clone()).zip(inner.y..) {
+        put_line(buf, inner.x, y, &log_line(line, &theme), inner.right());
     }
-
-    let newer = length - end;
+    let newer = logs.lines.len() - shown.end;
     if logs.view.is_some() && newer > 0 {
         let label = format!(" ↓ {newer} newer ");
-        let width = u16::try_from(label.chars().count()).unwrap_or(0);
-        let x = area.right().saturating_sub(2 + width);
-        put(
-            buf,
-            x,
-            area.bottom() - 1,
-            &label,
-            badge(theme.yellow),
-            area.right() - 1,
-        );
+        put_on_border(buf, area, area.bottom() - 1, &label, badge(theme.yellow));
     }
     app.log_page = height;
+}
+
+/// ` ● following `, ` ‖ paused ` or ` ■ ended `, in its color
+fn state(logs: &Logs, theme: &Theme) -> (&'static str, Color) {
+    if logs.ended {
+        (" ■ ended ", theme.dim)
+    } else if logs.view.is_none() {
+        (" ● following ", theme.green)
+    } else {
+        (" ‖ paused ", theme.yellow)
+    }
+}
+
+/// The lines that fit in `height`, ending at the newest or where it's scrolled to
+fn shown(logs: &Logs, height: usize) -> Range<usize> {
+    let length = logs.lines.len();
+    let end = logs.view.unwrap_or(length).min(length);
+    end.saturating_sub(height)..end
+}
+
+/// Its time, dim, then its text in its level's color
+fn log_line(line: &LogLine, theme: &Theme) -> Line<'static> {
+    let color = match line.level {
+        Level::Error => theme.red,
+        Level::Warning => theme.yellow,
+        Level::Info => theme.text,
+        Level::Debug => theme.dim,
+    };
+    let mut spans = Vec::new();
+    if !line.time.is_empty() {
+        spans.push(Span::styled(line.time.clone(), fg(theme.dim)));
+        spans.push(Span::raw(TIME_GAP));
+    }
+    spans.push(Span::styled(line.text.clone(), fg(color)));
+    Line::from(spans)
 }

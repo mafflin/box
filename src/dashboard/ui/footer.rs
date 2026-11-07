@@ -1,20 +1,32 @@
 //! The last line: the keys that work now, or the filter being typed; help and quit or a message on the right
 
+use std::cmp::Reverse;
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::style::Color;
 use ratatui::text::Span;
 
 use super::{bold, fg, fill, put, put_right, width};
-use crate::dashboard::app::{App, Tone, View};
+use crate::dashboard::app::{App, Logs, Tone, View};
+use crate::docker::Container;
 use crate::theme::Theme;
 
 /// Between the selection's keys and the list's
 const SEPARATOR: &str = "  │  ";
 /// Between two keys
-const GAP: usize = 2;
+const HINT_GAP: u16 = 2;
+/// Between a key and what it does
+const KEY_GAP: u16 = 1;
+/// Before the first hint and after the last thing on the right
+const MARGIN: u16 = 1;
+/// The end of the filter being typed
+const CURSOR: &str = "▏";
+/// Between the filter and the hints
+const FILTER_GAP: u16 = 3;
 
 /// A key, what it does, whether it does it for the selection, and how long it stays when the line is too
-/// short: the lowest goes first
+/// short: the one with the lowest `keep` goes first, so the higher it is, the longer it stays
 struct Hint {
     key: &'static str,
     description: &'static str,
@@ -32,8 +44,13 @@ const fn hint(key: &'static str, description: &'static str, keep: u8) -> Hint {
 }
 
 impl Hint {
+    /// Dimmed when it doesn't work for the selection
+    const fn enabled_if(self, enabled: bool) -> Self {
+        Self { enabled, ..self }
+    }
+
     fn width(&self) -> usize {
-        width(self.key) + 1 + width(self.description)
+        width(self.key) + usize::from(KEY_GAP) + width(self.description)
     }
 }
 
@@ -44,30 +61,20 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
     let theme = app.theme;
     fill(buf, area, theme.muted, theme.bar);
 
-    let toast = app.toast.as_ref().map(|toast| {
-        let color = match toast.tone {
-            Tone::Info => theme.text,
-            Tone::Good => theme.green,
-            Tone::Warn => theme.yellow,
-            Tone::Bad => theme.red,
-        };
-        (format!("{} ", toast.text), color)
-    });
+    let toast = toast(app);
     let (mut groups, pinned) = hints(app);
     let right = match (&toast, pinned) {
-        (Some((text, _)), _) => width(text),
-        (None, true) => line_width(&[&PINNED[..]]) + 1,
+        (Some((text, _)), _) => width(text) + usize::from(MARGIN),
+        (None, true) => line_width(&[&PINNED[..]]) + usize::from(MARGIN),
         (None, false) => 0,
     };
 
-    let mut x = area.x + 1;
+    let mut x = area.x + MARGIN;
     if app.filtering {
-        let filter = &app.filter[app.view.index()];
-        x = put(buf, x, area.y, "filter ", fg(theme.muted), area.right());
-        x = put(buf, x, area.y, filter, bold(theme.text), area.right());
-        x = put(buf, x, area.y, "▏", bold(theme.accent), area.right()) + 3;
+        x = draw_filter(buf, x, area, app) + FILTER_GAP;
     }
-    let room = usize::from(area.right().saturating_sub(x)).saturating_sub(right + GAP);
+    let room =
+        usize::from(area.right().saturating_sub(x)).saturating_sub(right + usize::from(HINT_GAP));
     fit(&mut groups, room);
 
     let groups: Vec<&[Hint]> = groups.iter().map(Vec::as_slice).collect();
@@ -75,7 +82,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
     if let Some((text, color)) = toast {
         put_right(
             buf,
-            area.right(),
+            area.right().saturating_sub(MARGIN),
             area.y,
             &[Span::styled(text, bold(color))],
         );
@@ -85,6 +92,29 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
             .saturating_sub(u16::try_from(right).unwrap_or(0));
         draw_hints(buf, start.max(x), area, &[&PINNED[..]], &theme);
     }
+}
+
+/// The message to show, in its tone's color
+fn toast(app: &App) -> Option<(String, Color)> {
+    let theme = app.theme;
+    app.toast.as_ref().map(|toast| {
+        let color = match toast.tone {
+            Tone::Info => theme.text,
+            Tone::Good => theme.green,
+            Tone::Warn => theme.yellow,
+            Tone::Bad => theme.red,
+        };
+        (toast.text.clone(), color)
+    })
+}
+
+/// `filter text▏` from `x`; where it ends
+fn draw_filter(buf: &mut Buffer, x: u16, area: Rect, app: &App) -> u16 {
+    let theme = app.theme;
+    let filter = &app.filter[app.view.index()];
+    let x = put(buf, x, area.y, "filter ", fg(theme.muted), area.right());
+    let x = put(buf, x, area.y, filter, bold(theme.text), area.right());
+    put(buf, x, area.y, CURSOR, bold(theme.accent), area.right())
 }
 
 /// The hints from `x`, a separator between groups; where they end
@@ -100,7 +130,7 @@ fn draw_hints(buf: &mut Buffer, mut x: u16, area: Rect, groups: &[&[Hint]], them
         }
         for (j, hint) in group.iter().enumerate() {
             if j > 0 {
-                x += u16::try_from(GAP).unwrap_or(0);
+                x += HINT_GAP;
             }
             let (key_style, description_style) = if hint.enabled {
                 (bold(theme.accent), fg(theme.muted))
@@ -110,7 +140,7 @@ fn draw_hints(buf: &mut Buffer, mut x: u16, area: Rect, groups: &[&[Hint]], them
             x = put(buf, x, area.y, hint.key, key_style, area.right());
             x = put(
                 buf,
-                x + 1,
+                x + KEY_GAP,
                 area.y,
                 hint.description,
                 description_style,
@@ -125,7 +155,9 @@ fn line_width(groups: &[&[Hint]]) -> usize {
     let shown: Vec<&&[Hint]> = groups.iter().filter(|group| !group.is_empty()).collect();
     let hints: usize = shown
         .iter()
-        .map(|group| group.iter().map(Hint::width).sum::<usize>() + GAP * (group.len() - 1))
+        .map(|group| {
+            group.iter().map(Hint::width).sum::<usize>() + usize::from(HINT_GAP) * (group.len() - 1)
+        })
         .sum();
     hints + width(SEPARATOR) * shown.len().saturating_sub(1)
 }
@@ -146,7 +178,8 @@ fn fit(groups: &mut [Vec<Hint>], room: usize) {
                     .enumerate()
                     .map(move |(h, hint)| (hint.keep, g, h))
             })
-            .min_by(|a, b| a.0.cmp(&b.0).then((b.1, b.2).cmp(&(a.1, a.2))));
+            // The lowest keep; of two as low, the later one
+            .max_by_key(|&(keep, g, h)| (Reverse(keep), g, h));
         let Some((_, g, h)) = first else {
             return;
         };
@@ -157,45 +190,56 @@ fn fit(groups: &mut [Vec<Hint>], room: usize) {
 /// The keys that work now, in groups, and whether help and quit are pinned on the right
 fn hints(app: &mut App) -> (Vec<Vec<Hint>>, bool) {
     if app.filtering {
-        let keys = vec![
-            hint("enter", "keep", 3),
-            hint("esc", "clear", 2),
-            hint("↑↓", "move", 1),
-        ];
-        return (vec![keys], false);
+        return (vec![filter_hints()], false);
     }
     if let Some(logs) = &app.logs {
-        let pause = if logs.view.is_none() {
-            "pause"
-        } else {
-            "follow"
-        };
-        let keys = vec![
-            hint("esc", "back", 4),
-            hint("space", pause, 3),
-            hint("↑↓", "scroll", 2),
-            hint("g G", "top / end", 1),
-        ];
-        return (vec![keys], false);
+        return (vec![logs_hints(logs)], false);
     }
-    // What the list shows and how
-    let list = |sort: &'static str| {
-        vec![
-            hint("/", "filter", 8),
-            hint("i", "details", 4),
-            hint(sort, "sort", 3),
-            hint("tab", "view", 2),
-            hint("p", "prune", 5),
-        ]
+    match app.view {
+        View::Containers => (container_hints(app), true),
+        View::Images => (
+            vec![vec![hint("d", "remove", 9)], list_hints("N S T")],
+            true,
+        ),
+        View::Volumes => (vec![vec![hint("d", "remove", 9)], list_hints("N T")], true),
+    }
+}
+
+fn filter_hints() -> Vec<Hint> {
+    vec![
+        hint("enter", "keep", 3),
+        hint("esc", "clear", 2),
+        hint("↑↓", "move", 1),
+    ]
+}
+
+fn logs_hints(logs: &Logs) -> Vec<Hint> {
+    let pause = if logs.view.is_none() {
+        "pause"
+    } else {
+        "follow"
     };
-    if app.view != View::Containers {
-        let sort = if app.view == View::Images {
-            "N S T"
-        } else {
-            "N T"
-        };
-        return (vec![vec![hint("d", "remove", 9)], list(sort)], true);
-    }
+    vec![
+        hint("esc", "back", 4),
+        hint("space", pause, 3),
+        hint("↑↓", "scroll", 2),
+        hint("g G", "top / end", 1),
+    ]
+}
+
+/// What the list shows and how, `sort` its sort keys
+fn list_hints(sort: &'static str) -> Vec<Hint> {
+    vec![
+        hint("/", "filter", 8),
+        hint("i", "details", 4),
+        hint(sort, "sort", 3),
+        hint("tab", "view", 2),
+        hint("p", "prune", 5),
+    ]
+}
+
+/// What works for the selected container, then the list's keys with showing all or only the running ones
+fn container_hints(app: &mut App) -> Vec<Vec<Hint>> {
     let show = if app.show_all { "running" } else { "all" };
     let selected = app.selected_container();
     let stop = if selected.is_some_and(|container| !container.is_up()) {
@@ -203,55 +247,19 @@ fn hints(app: &mut App) -> (Vec<Vec<Hint>>, bool) {
     } else {
         "stop"
     };
-    let logs = !selected.is_some_and(crate::docker::Container::is_interactive);
-    let shell = selected.is_some_and(crate::docker::Container::is_running);
+    let logs = !selected.is_some_and(Container::is_interactive);
+    let shell = selected.is_some_and(Container::is_running);
     let selection = vec![
         hint("s", stop, 10),
         hint("r", "restart", 7),
         hint("d", "remove", 8),
-        Hint {
-            enabled: logs,
-            ..hint("l", "logs", 10)
-        },
-        Hint {
-            enabled: shell,
-            ..hint("e", "shell", 9)
-        },
+        hint("l", "logs", 10).enabled_if(logs),
+        hint("e", "shell", 9).enabled_if(shell),
     ];
-    let mut list = list("P M N T");
+    let mut list = list_hints("P M N T");
     list.insert(1, hint("a", show, 6));
-    (vec![selection, list], true)
+    vec![selection, list]
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn keys(groups: &[Vec<Hint>]) -> Vec<Vec<&str>> {
-        groups
-            .iter()
-            .map(|group| group.iter().map(|hint| hint.key).collect())
-            .collect()
-    }
-
-    #[test]
-    fn drops_the_hints_that_go_first() {
-        // `s stop  r restart  │  / filter  i details`, 41 wide
-        let mut groups = vec![
-            vec![hint("s", "stop", 3), hint("r", "restart", 1)],
-            vec![hint("/", "filter", 2), hint("i", "details", 1)],
-        ];
-        fit(&mut groups, 41);
-        assert_eq!(keys(&groups), [vec!["s", "r"], vec!["/", "i"]]);
-        // Of two that go as soon, the later one
-        fit(&mut groups, 30);
-        assert_eq!(keys(&groups), [vec!["s", "r"], vec!["/"]]);
-        fit(&mut groups, 20);
-        assert_eq!(keys(&groups), [vec!["s"], vec!["/"]]);
-        // No separator for an empty group
-        fit(&mut groups, 6);
-        assert_eq!(keys(&groups), [vec!["s"], vec![]]);
-        fit(&mut groups, 0);
-        assert_eq!(keys(&groups), [Vec::<&str>::new(), vec![]]);
-    }
-}
+mod tests;

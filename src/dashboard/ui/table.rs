@@ -4,14 +4,26 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 
-use super::{bold, fg, fill, fit, put, rounded_box};
-use crate::dashboard::app::{App, Pending, SortKey, View};
-use crate::docker::Container;
+use super::{NO_VALUE, bold, fg, fill, fit, put, put_on_border, rounded_box};
+use crate::dashboard::app::{App, Pending, Sort, SortKey, View};
+use crate::docker::{Container, Image, Stats};
 use crate::format::{compact_bytes, short_id};
 use crate::theme::Theme;
 
+/// Between two columns
 const GAP: u16 = 2;
+/// Before the first column
 const LEAD: u16 = 1;
+/// After the last column
+const TRAIL: u16 = 1;
+/// The header and a row
+const MIN_INNER_HEIGHT: u16 = 2;
+const MIN_INNER_WIDTH: u16 = 8;
+/// So `width / flex` compares in whole numbers for flex 1 to 4
+const FLEX_SCALE: usize = 12;
+
+/// A cell's text and style
+type Cell = (String, Style);
 
 struct Column {
     title: &'static str,
@@ -20,7 +32,9 @@ struct Column {
     /// How readily it gives up width when there isn't enough, 0 for never
     flex: usize,
     min: usize,
-    cells: Vec<(String, Style)>,
+    /// Keeps its colors in a dimmed row
+    never_dimmed: bool,
+    cells: Vec<Cell>,
     width: usize,
 }
 
@@ -32,6 +46,7 @@ impl Column {
             right_aligned: false,
             flex: 0,
             min: 0,
+            never_dimmed: false,
             cells: Vec::new(),
             width: 0,
         }
@@ -47,13 +62,18 @@ impl Column {
         self.min = min;
         self
     }
+
+    fn never_dimmed(mut self) -> Self {
+        self.never_dimmed = true;
+        self
+    }
 }
 
 pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
     let theme = app.theme;
     let view = app.view;
     let inner = rounded_box(buf, area, theme.border, view.title(), bold(theme.text));
-    if inner.width < 8 || inner.height < 2 {
+    if inner.width < MIN_INNER_WIDTH || inner.height < MIN_INNER_HEIGHT {
         return;
     }
 
@@ -64,18 +84,77 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
         View::Volumes => volumes(app, &rows),
     };
     let sort = app.sort[view.index()];
+    let headers = headers(&columns, sort);
+    fit_widths(
+        &mut columns,
+        &headers,
+        usize::from(inner.width - LEAD - TRAIL),
+    );
+    draw_header(buf, inner, &columns, &headers, sort, &theme);
+
+    let body = Rect {
+        y: inner.y + 1,
+        height: inner.height - 1,
+        ..inner
+    };
+    let height = usize::from(body.height);
+    app.page = height.saturating_sub(1).max(1);
+    let scroll = scroll(&mut app.scroll[view.index()], selected, height, rows.len());
+    for (y, position) in (body.y..body.bottom()).zip(scroll..rows.len()) {
+        let row = rows[position];
+        let background = if Some(position) == selected {
+            Some(theme.selected)
+        } else {
+            (position % 2 == 1).then_some(theme.stripe)
+        };
+        let row_area = Rect {
+            y,
+            height: 1,
+            ..body
+        };
+        draw_row(
+            buf,
+            row_area,
+            &columns,
+            row,
+            dimmed[row],
+            background,
+            &theme,
+        );
+    }
+
+    if rows.is_empty() {
+        draw_empty(buf, body, &empty_message(app), &theme);
+    } else if let Some(selected) = selected {
+        let position = format!(" {}/{} ", selected + 1, rows.len());
+        put_on_border(buf, area, area.bottom() - 1, &position, fg(theme.muted));
+    }
+}
+
+/// The columns' titles, an arrow on the sorted one
+fn headers(columns: &[Column], sort: Sort) -> Vec<String> {
     let arrow = if sort.descending { " ▼" } else { " ▲" };
-    let headers: Vec<String> = columns
+    columns
         .iter()
         .map(|column| {
             let sorted = column.sort == Some(sort.key);
             format!("{}{}", column.title, if sorted { arrow } else { "" })
         })
-        .collect();
-    fit_widths(&mut columns, &headers, usize::from(inner.width - LEAD - 1));
+        .collect()
+}
 
-    fill(buf, Rect { height: 1, ..inner }, theme.text, theme.bar);
-    let cells = headers.iter().zip(&columns).map(|(header, column)| {
+/// The titles on a bar, the sorted one in the accent color
+fn draw_header(
+    buf: &mut Buffer,
+    inner: Rect,
+    columns: &[Column],
+    headers: &[String],
+    sort: Sort,
+    theme: &Theme,
+) {
+    let area = Rect { height: 1, ..inner };
+    fill(buf, area, theme.text, theme.bar);
+    let cells = headers.iter().zip(columns).map(|(header, column)| {
         let color = if column.sort == Some(sort.key) {
             theme.accent
         } else {
@@ -83,55 +162,39 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
         };
         (header.clone(), bold(color))
     });
-    draw_cells(buf, Rect { height: 1, ..inner }, &columns, cells);
+    draw_cells(buf, area, columns, cells);
+}
 
-    let height = usize::from(inner.height - 1);
-    app.page = height.saturating_sub(1).max(1);
-    let scroll = scroll(&mut app.scroll[view.index()], selected, height, rows.len());
-    for (line, position) in (scroll..rows.len()).take(height).enumerate() {
-        let row = rows[position];
-        let is_selected = Some(position) == selected;
-        let row_area = Rect::new(
-            inner.x,
-            inner.y + 1 + u16::try_from(line).unwrap_or(0),
-            inner.width,
-            1,
-        );
-        if is_selected {
-            fill(buf, row_area, theme.text, theme.selected);
-        } else if position % 2 == 1 {
-            fill(buf, row_area, theme.text, theme.stripe);
+/// A row's cells on its background, dim but for the columns that never are when it's dimmed
+fn draw_row(
+    buf: &mut Buffer,
+    area: Rect,
+    columns: &[Column],
+    row: usize,
+    dimmed: bool,
+    background: Option<Color>,
+    theme: &Theme,
+) {
+    if let Some(background) = background {
+        fill(buf, area, theme.text, background);
+    }
+    let cells = columns.iter().map(|column| {
+        let (text, style) = column.cells[row].clone();
+        if dimmed && !column.never_dimmed {
+            (text, fg(theme.dim))
+        } else {
+            (text, style)
         }
-        let cells = columns.iter().map(|column| {
-            let (text, style) = column.cells[row].clone();
-            if dimmed[row] && column.title != "STATUS" {
-                (text, fg(theme.dim))
-            } else {
-                (text, style)
-            }
-        });
-        draw_cells(buf, row_area, &columns, cells);
-    }
+    });
+    draw_cells(buf, area, columns, cells);
+}
 
-    if rows.is_empty() {
-        let message = empty_message(app);
-        let width = u16::try_from(message.chars().count()).unwrap_or(0);
-        let x = inner.x + inner.width.saturating_sub(width) / 2;
-        let y = inner.y + 1 + (inner.height - 1).min(3) / 2;
-        put(buf, x, y, &message, fg(theme.dim), inner.right());
-    } else if let Some(selected) = selected {
-        let position = format!(" {}/{} ", selected + 1, rows.len());
-        let width = u16::try_from(position.len()).unwrap_or(0);
-        let x = area.right().saturating_sub(2 + width);
-        put(
-            buf,
-            x,
-            area.bottom() - 1,
-            &position,
-            fg(theme.muted),
-            area.right() - 1,
-        );
-    }
+/// In the middle, a row below the header when there's room
+fn draw_empty(buf: &mut Buffer, body: Rect, message: &str, theme: &Theme) {
+    let width = u16::try_from(message.chars().count()).unwrap_or(0);
+    let x = body.x + body.width.saturating_sub(width) / 2;
+    let y = body.y + u16::from(body.height > 1);
+    put(buf, x, y, message, fg(theme.dim), body.right());
 }
 
 /// The first row shown, moved to keep the selection in view
@@ -148,12 +211,7 @@ fn scroll(scroll: &mut usize, selected: Option<usize>, height: usize, rows: usiz
 }
 
 /// A line's cells, each fitted to its column
-fn draw_cells(
-    buf: &mut Buffer,
-    area: Rect,
-    columns: &[Column],
-    cells: impl Iterator<Item = (String, Style)>,
-) {
+fn draw_cells(buf: &mut Buffer, area: Rect, columns: &[Column], cells: impl Iterator<Item = Cell>) {
     let mut x = area.x + LEAD;
     for (column, (text, style)) in columns.iter().zip(cells) {
         let text = fit(&text, column.width, column.right_aligned);
@@ -186,7 +244,7 @@ fn fit_widths(columns: &mut [Column], headers: &[String], available: usize) {
         let Some(widest) = columns
             .iter_mut()
             .filter(|column| column.flex > 0 && column.width > column.min)
-            .max_by_key(|column| column.width * 12 / column.flex)
+            .max_by_key(|column| column.width * FLEX_SCALE / column.flex)
         else {
             return;
         };
@@ -213,42 +271,20 @@ fn containers(app: &App, rows: &[usize]) -> (Vec<Column>, Vec<bool>) {
     let mut name = Column::new("NAME", Some(SortKey::Name)).flex(2, 8);
     let mut image = Column::new("IMAGE", None).flex(3, 10);
     // Up for how long, so sorted by the start
-    let mut status = Column::new("STATUS", Some(SortKey::Started)).flex(1, 10);
+    let mut status = Column::new("STATUS", Some(SortKey::Started))
+        .flex(1, 10)
+        .never_dimmed();
     let mut cpu = Column::new("CPU%", Some(SortKey::Cpu)).right();
     let mut memory = Column::new("MEM", Some(SortKey::Memory)).right();
     let mut network = Column::new("NET I/O", None).right();
     let mut pids = Column::new("PIDS", None).right();
     let mut ports = Column::new("PORTS", None).flex(3, 8);
-    let none = || ("—".to_string(), fg(theme.dim));
 
     for container in &app.containers {
         name.cells.push((container.name.clone(), fg(theme.name)));
         image.cells.push((container.image.clone(), fg(theme.image)));
         status.cells.push(status_cell(app, container));
-        let usage = app.container_stats(container).map_or_else(
-            || [none(), none(), none(), none()],
-            |usage| {
-                [
-                    (
-                        format!("{:.1}", usage.cpu),
-                        fg(theme.level(usage.cpu / 100.0, theme.text)),
-                    ),
-                    (
-                        compact_bytes(usage.memory),
-                        fg(theme.level(fraction(usage.memory, usage.memory_limit), theme.text)),
-                    ),
-                    (
-                        format!(
-                            "{} / {}",
-                            compact_bytes(usage.network.0),
-                            compact_bytes(usage.network.1)
-                        ),
-                        fg(theme.text),
-                    ),
-                    (usage.pids.to_string(), fg(theme.text)),
-                ]
-            },
-        );
+        let usage = usage_cells(&theme, app.container_stats(container));
         for (column, cell) in [&mut cpu, &mut memory, &mut network, &mut pids]
             .into_iter()
             .zip(usage)
@@ -269,7 +305,31 @@ fn containers(app: &App, rows: &[usize]) -> (Vec<Column>, Vec<bool>) {
     (columns, dimmed)
 }
 
-fn status_cell(app: &App, container: &Container) -> (String, Style) {
+/// CPU, memory, network and PIDs, colored by how close they are to the limit; `—` without stats
+fn usage_cells(theme: &Theme, stats: Option<&Stats>) -> [Cell; 4] {
+    let Some(stats) = stats else {
+        return std::array::from_fn(|_| (NO_VALUE.to_string(), fg(theme.dim)));
+    };
+    let (received, sent) = stats.network;
+    let memory = fraction(stats.memory, stats.memory_limit);
+    [
+        (
+            format!("{:.1}", stats.cpu),
+            fg(theme.level(stats.cpu / 100.0, theme.text)),
+        ),
+        (
+            compact_bytes(stats.memory),
+            fg(theme.level(memory, theme.text)),
+        ),
+        (
+            format!("{} / {}", compact_bytes(received), compact_bytes(sent)),
+            fg(theme.text),
+        ),
+        (stats.pids.to_string(), fg(theme.text)),
+    ]
+}
+
+fn status_cell(app: &App, container: &Container) -> Cell {
     let theme = app.theme;
     if let Some(pending) = app.pending(container) {
         let color = if pending == Pending::Removing {
@@ -317,14 +377,12 @@ fn images(app: &App, rows: &[usize]) -> (Vec<Column>, Vec<bool>) {
         id.cells
             .push((short_id(&entry.id).to_string(), fg(theme.id)));
         let foreign = entry.is_foreign(&app.host);
-        platform.cells.push((
-            if foreign {
-                entry.platform.clone()
-            } else {
-                String::new()
-            },
-            fg(theme.yellow),
-        ));
+        let shown_platform = if foreign {
+            entry.platform.clone()
+        } else {
+            String::new()
+        };
+        platform.cells.push((shown_platform, fg(theme.yellow)));
         size.cells.push((entry.size.clone(), fg(theme.size)));
         created
             .cells
@@ -333,11 +391,7 @@ fn images(app: &App, rows: &[usize]) -> (Vec<Column>, Vec<bool>) {
             .cells
             .push(count_cell(&theme, app.image_users(entry).len()));
     }
-    let dimmed = app
-        .images
-        .iter()
-        .map(crate::docker::Image::is_dangling)
-        .collect();
+    let dimmed = app.images.iter().map(Image::is_dangling).collect();
     let mut columns = vec![image, id];
     if rows.iter().any(|&row| !platform.cells[row].0.is_empty()) {
         columns.push(platform);
@@ -369,7 +423,7 @@ fn volumes(app: &App, rows: &[usize]) -> (Vec<Column>, Vec<bool>) {
     (columns, dimmed)
 }
 
-fn count_cell(theme: &Theme, count: usize) -> (String, Style) {
+fn count_cell(theme: &Theme, count: usize) -> Cell {
     (
         count.to_string(),
         fg(if count == 0 { theme.dim } else { theme.count }),
