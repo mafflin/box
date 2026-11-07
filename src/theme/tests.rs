@@ -19,7 +19,7 @@ fn colors() {
     assert_eq!(theme.bar, Color::Rgb(0x10, 0x20, 0x30));
     // The rest keep their defaults
     assert_eq!(theme.accent, Color::Yellow);
-    assert_eq!(theme.level(0.9, Color::Blue), Color::Red);
+    assert_eq!(theme.level(0.9, Color::Blue), Color::LightRed);
     assert_eq!(theme.level(0.6, Color::Blue), Color::Yellow);
     assert_eq!(theme.level(0.1, Color::Blue), Color::Blue);
 }

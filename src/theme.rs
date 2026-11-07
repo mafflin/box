@@ -118,7 +118,7 @@ impl Default for Theme {
             memory: Color::Blue,
 
             text: Color::Reset,
-            red: Color::Red,
+            red: Color::LightRed,
             green: Color::Green,
             yellow: Color::Yellow,
         }
