@@ -1,5 +1,6 @@
 ---
-source: src/dashboard/ui/mod.rs
+source: src/dashboard/ui/tests.rs
+assertion_line: 15
 expression: screen
 ---
   Containers 5   Images 6   Volumes 4                                  sort started ▼   showing all
@@ -18,9 +19,8 @@ expression: screen
 │                           │  Stop container api?                     │                           │
 │                           │  docker stop api-id                      │                           │
 │                           │                                          │                           │
-│                           │   y  confirm     n  cancel               │                           │
-╰───────────────────────────╰──────────────────────────────────────────╯───────────────────── 1/5 ─╯
-╭─ api ────────────────────────────────────────────────────────────────────────────────────────────╮
+╰───────────────────────────│   y  confirm     n  cancel               │───────────────────── 1/5 ─╯
+╭─ api ─────────────────────╰──────────────────────────────────────────╯───────────────────────────╮
 │ image    acme/api:dev                                             CPU 18.0%   peak 30.6%         │
 │ status   Up 40 minutes (healthy)                                      ▂▄▅▅▄▂       ▃▄▅▄▃▁        │
 │ ip       172.18.0.3                                                 ▃▇██████▇▃  ▁▅███████▅▂  ▂▆▄ │
@@ -29,6 +29,7 @@ expression: screen
 │ workdir  /app                                                         ▁▂▃▃▂▁       ▂▃▃▃▂       ▃ │
 │ ports    3000->3000/tcp                                           ▁▃▅▇██████▇▅▃▁▄▆███████▆▄▂▂▅▇█ │
 │ mounts   /home/me/.lo…/proxy.conf:/etc/acme/proxy/proxy.conf:ro   ██████████████████████████████ │
-│ … 2 more                                                          NET ↓ 75M  ↑ 10M   PIDS 12     │
+│          /home/me/work/api:/app                                   NET ↓ 75M  ↑ 10M   PIDS 12     │
+│          bundle:/usr/local/bundle                                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
  s stop  r restart  d remove  l logs  e shell  │  / filter  a running  p prune       ? help  q quit

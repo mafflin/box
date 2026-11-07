@@ -1,5 +1,6 @@
 ---
-source: src/dashboard/ui/mod.rs
+source: src/dashboard/ui/tests.rs
+assertion_line: 15
 expression: screen
 ---
   Containers 5   Images 6   Volumes 4                                  sort started ▼   showing all
@@ -18,17 +19,17 @@ expression: screen
 │           │  P M N       sort cpu / mem / name      a           show stopped         │           │
 │           │  S           sort size                                                   │           │
 │           │  T           sort started / created     Images · Volumes                 │           │
-│           │  i           details bottom/right/off   d           remove if unused     │           │
-╰───────────│  p           prune                                                       │───── 1/5 ─╯
-╭─ api ─────│  q           quit                                                        │───────────╮
-│ image    a│                                                                          │6%         │
+╰───────────│  i           details bottom/right/off   d           remove if unused     │───── 1/5 ─╯
+╭─ api ─────│  p           prune                                                       │───────────╮
+│ image    a│  q           quit                                                        │6%         │
 │ status   U│                                                                          │▄▃▁        │
 │ ip       1│                                                                          │███▅▂  ▂▆▄ │
-│          1│  any key closes                                                          │█████▅▆███ │
-│ user     a╰──────────────────────────────────────────────────────────────────────────╯           │
-│ workdir  /app                                                         ▁▂▃▃▂▁       ▂▃▃▃▂       ▃ │
+│          1│                                                                          │█████▅▆███ │
+│ user     a│  any key closes                                                          │           │
+│ workdir  /╰──────────────────────────────────────────────────────────────────────────╯▃▂       ▃ │
 │ ports    3000->3000/tcp                                           ▁▃▅▇██████▇▅▃▁▄▆███████▆▄▂▂▅▇█ │
 │ mounts   /home/me/.lo…/proxy.conf:/etc/acme/proxy/proxy.conf:ro   ██████████████████████████████ │
-│ … 2 more                                                          NET ↓ 75M  ↑ 10M   PIDS 12     │
+│          /home/me/work/api:/app                                   NET ↓ 75M  ↑ 10M   PIDS 12     │
+│          bundle:/usr/local/bundle                                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
  s stop  r restart  d remove  l logs  e shell  │  / filter  a running  p prune       ? help  q quit

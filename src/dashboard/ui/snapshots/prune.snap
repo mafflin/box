@@ -1,5 +1,6 @@
 ---
-source: src/dashboard/ui/mod.rs
+source: src/dashboard/ui/tests.rs
+assertion_line: 15
 expression: screen
 ---
   Containers 5   Images 6   Volumes 4                                  sort started ▼   showing all
@@ -18,17 +19,17 @@ expression: screen
 │                     │   [x] dangling images        1  412MB                │                     │
 │                     │                                                      │                     │
 │                     │  runs in order: containers → volumes → images        │                     │
-│                     │                                                      │                     │
 ╰─────────────────────│                                                      │─────────────── 1/5 ─╯
-╭─ api ───────────────│  ↑↓ move  space toggle  enter run  esc cancel        │─────────────────────╮
-│ image    acme/api:de╰──────────────────────────────────────────────────────╯  peak 30.6%         │
-│ status   Up 40 minutes (healthy)                                      ▂▄▅▅▄▂       ▃▄▅▄▃▁        │
+╭─ api ───────────────│                                                      │─────────────────────╮
+│ image    acme/api:de│  ↑↓ move  space toggle  enter run  esc cancel        │  peak 30.6%         │
+│ status   Up 40 minut╰──────────────────────────────────────────────────────╯       ▃▄▅▄▃▁        │
 │ ip       172.18.0.3                                                 ▃▇██████▇▃  ▁▅███████▅▂  ▂▆▄ │
 │          172.19.0.4                                               ▅▇██████████▇▄███████████▅▆███ │
 │ user     app                                                      MEM 649M / 2.0G                │
 │ workdir  /app                                                         ▁▂▃▃▂▁       ▂▃▃▃▂       ▃ │
 │ ports    3000->3000/tcp                                           ▁▃▅▇██████▇▅▃▁▄▆███████▆▄▂▂▅▇█ │
 │ mounts   /home/me/.lo…/proxy.conf:/etc/acme/proxy/proxy.conf:ro   ██████████████████████████████ │
-│ … 2 more                                                          NET ↓ 75M  ↑ 10M   PIDS 12     │
+│          /home/me/work/api:/app                                   NET ↓ 75M  ↑ 10M   PIDS 12     │
+│          bundle:/usr/local/bundle                                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
  s stop  r restart  d remove  l logs  e shell  │  / filter  a running  p prune       ? help  q quit

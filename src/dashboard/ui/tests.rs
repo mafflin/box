@@ -50,6 +50,17 @@ fn containers() {
 }
 
 #[test]
+fn bottom_details_grow_to_fit() {
+    let mut app = sample::app();
+    // The usual share of 100x30 cuts api's details; all of them fit in half
+    let shown = screen(&mut app, 100, 30);
+    assert!(shown.contains("bundle:/usr/local/bundle"));
+    assert!(!shown.contains(" more"));
+    // Never more than half
+    assert!(screen(&mut app, 80, 24).contains("… 2 more"));
+}
+
+#[test]
 fn styles() {
     let mut app = sample::app();
     // A count color unlike plain text, so the check below can tell them apart

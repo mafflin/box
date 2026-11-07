@@ -69,6 +69,21 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App, bottom: bool) {
     }
 }
 
+/// The rows the selection's details need with their box: their lines and the two borders, 0 for no selection
+pub fn height(app: &mut App) -> u16 {
+    let (rows, selected) = app.selection();
+    let Some(row) = selected.map(|position| rows[position]) else {
+        return 0;
+    };
+    let lines = match app.view {
+        // Its mounts take a line each however wide they are
+        View::Containers => container_lines(app, &app.containers[row], usize::MAX).len(),
+        View::Images => image_lines(app, &app.images[row]).len(),
+        View::Volumes => volume_lines(app, &app.volumes[row]).len(),
+    };
+    u16::try_from(lines).unwrap_or(u16::MAX).saturating_add(2)
+}
+
 /// The selected container's name, image's reference or volume's short name
 fn title(app: &App, row: usize) -> String {
     match app.view {

@@ -18,6 +18,10 @@ use crate::theme::Theme;
 
 const MIN_WIDTH: u16 = 30;
 const MIN_HEIGHT: u16 = 6;
+/// The details at the bottom usually take this share of the body, up to `BOTTOM_DETAILS_ROWS`, and more
+/// when their lines need it
+const BOTTOM_DETAILS_PERCENT: u16 = 42;
+const BOTTOM_DETAILS_ROWS: u16 = 12;
 /// Shown for what has no value
 const NO_VALUE: &str = "—";
 
@@ -61,7 +65,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 fn draw_body(buf: &mut Buffer, area: Rect, app: &mut App) {
     match app.details {
         Details::Bottom if area.height >= 14 => {
-            let height = (area.height * 42 / 100).min(12);
+            // As tall as they need, never shorter than usual, at most half
+            let usual = (area.height * BOTTOM_DETAILS_PERCENT / 100).min(BOTTOM_DETAILS_ROWS);
+            let height = detail::height(app).clamp(usual, area.height / 2);
             let table = Rect {
                 height: area.height - height,
                 ..area
