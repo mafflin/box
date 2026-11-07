@@ -1,5 +1,6 @@
 //! How box shows docker's values: mounts, IDs, dates, sizes and log lines
 
+use std::cmp::Ordering;
 use std::iter::Peekable;
 use std::ops::RangeInclusive;
 use std::str::Chars;
@@ -20,6 +21,22 @@ const HOME_SHORTCUT: &str = "~";
 const DATE_FORMAT: &str = "%Y-%m-%d %H:%M";
 /// A mount's source isn't shortened to less, the line is cut instead
 const MIN_SOURCE: usize = 8;
+/// Shells whose `-c` script is shown as written, like Docker's shell form `CMD rails s`, kept as
+/// `/bin/sh -c "rails s"`
+const SHELLS: [&str; 4] = ["sh", "/bin/sh", "bash", "/bin/bash"];
+const SCRIPT_FLAG: &str = "-c";
+/// Besides letters and digits, what a shell takes as plain text, so an argument of only these needs no quotes
+const PLAIN: &str = "-_./:=@%+,";
+/// A `'` inside single quotes: end them, an escaped `'`, start them again
+const QUOTE_IN_QUOTES: &str = r"'\''";
+/// Bytes in a kilobyte, as docker counts image sizes and traffic
+const KB: u64 = 1000;
+/// Bytes in a kibibyte, as top and docker stats count memory
+const KIB: u64 = 1024;
+/// Below this, `compact_bytes` shows one decimal, like `9.5M`; from it, none, like `310M`, as top does
+const ONE_DECIMAL_BELOW: u64 = 10;
+/// Docker shows image sizes to this many digits: `412MB`, `48.2MB`, `1.21GB`
+const SIZE_DIGITS: usize = 3;
 
 /// A text with a part to stand out, empty when nothing does
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -130,28 +147,31 @@ fn shorten(path: &str, home: &str) -> String {
     }
 }
 
-/// Arguments as a shell takes them, quoting the ones that need it; a `sh -c` script as it's written
+/// Arguments as a shell takes them, quoting the ones that need it; a shell's `-c` script as it's written
 pub fn command(args: &[String]) -> String {
     if let [shell, flag, script] = args
-        && flag == "-c"
-        && matches!(shell.as_str(), "sh" | "/bin/sh" | "bash" | "/bin/bash")
+        && SHELLS.contains(&shell.as_str())
+        && flag == SCRIPT_FLAG
     {
         return script.clone();
     }
     args.iter()
-        .map(|arg| {
-            let safe = !arg.is_empty()
-                && arg
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || "-_./:=@%+,".contains(c));
-            if safe {
-                arg.clone()
-            } else {
-                format!("'{}'", arg.replace('\'', r"'\''"))
-            }
-        })
+        .map(|arg| quote(arg))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// `arg` as a shell reads it back: as it is when it's plain, else in single quotes
+fn quote(arg: &str) -> String {
+    let plain = !arg.is_empty()
+        && arg
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || PLAIN.contains(c));
+    if plain {
+        arg.to_string()
+    } else {
+        format!("'{}'", arg.replace('\'', QUOTE_IN_QUOTES))
+    }
 }
 
 /// The first 12 hex digits, without `sha256:`
@@ -177,83 +197,102 @@ pub fn local_date(timestamp: &str) -> String {
     )
 }
 
+/// Bytes in KiB as a float, for scales like a graph's: without loss, up to 4 TiB
+pub fn kib(bytes: u64) -> f64 {
+    f64::from(u32::try_from(bytes / KIB).unwrap_or(u32::MAX))
+}
+
 /// Bytes in powers of 1024 the way top shows them: `512B`, `9.5K`, `310M`, `1.9G`
-#[allow(clippy::cast_precision_loss)]
 pub fn compact_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "K", "M", "G", "T"];
-    if bytes < 1024 {
+    if bytes < KIB {
         return format!("{bytes}B");
     }
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit < UNITS.len() - 1 {
-        value /= 1024.0;
-        unit += 1;
-    }
-    if value < 10.0 {
-        format!("{value:.1}{}", UNITS[unit])
+    let (scale, unit) = unit_for(bytes, KIB, UNITS.len());
+    let bytes = u128::from(bytes);
+    if bytes < u128::from(ONE_DECIMAL_BELOW) * scale {
+        let tenths = div_round(bytes * 10, scale);
+        format!("{}.{}{}", tenths / 10, tenths % 10, UNITS[unit])
     } else {
-        format!("{value:.0}{}", UNITS[unit])
+        format!("{}{}", div_round(bytes, scale), UNITS[unit])
     }
 }
 
 /// Bytes the way docker shows image sizes, in powers of 1000 to 3 digits: `412MB`, `1.21GB`
-#[allow(clippy::cast_precision_loss)]
 pub fn human_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "kB", "MB", "GB", "TB"];
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1000.0 && unit < UNITS.len() - 1 {
-        value /= 1000.0;
-        unit += 1;
+    let (scale, unit) = unit_for(bytes, KB, UNITS.len());
+    let bytes = u128::from(bytes);
+    let integer_digits = (bytes / scale).to_string().len();
+    let decimals = SIZE_DIGITS.saturating_sub(integer_digits);
+    let shift = 10_u128.pow(u32::try_from(decimals).unwrap_or(0));
+    // A half up, as sizes are usually rounded
+    let number = (bytes * shift + scale / 2) / scale;
+    let whole = number / shift;
+    let fraction = format!("{:0decimals$}", number % shift);
+    let fraction = fraction.trim_end_matches('0');
+    if fraction.is_empty() {
+        format!("{whole}{}", UNITS[unit])
+    } else {
+        format!("{whole}.{fraction}{}", UNITS[unit])
     }
-    let decimals = if value >= 100.0 {
-        0
-    } else if value >= 10.0 {
-        1
-    } else {
-        2
-    };
-    let number = format!("{value:.decimals$}");
-    let number = if number.contains('.') {
-        number.trim_end_matches('0').trim_end_matches('.')
-    } else {
-        &number
-    };
-    format!("{number}{}", UNITS[unit])
 }
 
-/// Bytes from docker's sizes, decimal like `1.2kB` or binary like `3.5MiB`
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss
-)]
+/// The largest power of `base` not above `bytes`, up to the last of `units`, and which one it is
+fn unit_for(bytes: u64, base: u64, units: usize) -> (u128, usize) {
+    let (bytes, base) = (u128::from(bytes), u128::from(base));
+    let mut scale = 1;
+    let mut unit = 0;
+    while bytes >= scale * base && unit < units - 1 {
+        scale *= base;
+        unit += 1;
+    }
+    (scale, unit)
+}
+
+/// `numerator / denominator` to the nearest whole number, a half to the even one, as top and `format!` round
+fn div_round(numerator: u128, denominator: u128) -> u128 {
+    let quotient = numerator / denominator;
+    match (numerator % denominator * 2).cmp(&denominator) {
+        Ordering::Less => quotient,
+        Ordering::Greater => quotient + 1,
+        Ordering::Equal => quotient + quotient % 2,
+    }
+}
+
+/// Bytes from docker's sizes, decimal like `1.2kB` or binary like `3.5MiB`, to the nearest byte
 pub fn parse_size(size: &str) -> Option<u64> {
     const UNITS: [(&str, u64); 13] = [
         ("", 1),
         ("B", 1),
-        ("kB", 1_000),
-        ("KB", 1_000),
-        ("MB", 1_000_000),
-        ("GB", 1_000_000_000),
-        ("TB", 1_000_000_000_000),
-        ("PB", 1_000_000_000_000_000),
-        ("KiB", 1 << 10),
-        ("MiB", 1 << 20),
-        ("GiB", 1 << 30),
-        ("TiB", 1 << 40),
-        ("PiB", 1 << 50),
+        ("kB", KB),
+        ("KB", KB),
+        ("MB", KB.pow(2)),
+        ("GB", KB.pow(3)),
+        ("TB", KB.pow(4)),
+        ("PB", KB.pow(5)),
+        ("KiB", KIB),
+        ("MiB", KIB.pow(2)),
+        ("GiB", KIB.pow(3)),
+        ("TiB", KIB.pow(4)),
+        ("PiB", KIB.pow(5)),
     ];
     let size = size.trim();
     let split = size
         .find(|c: char| !(c.is_ascii_digit() || c == '.'))
         .unwrap_or(size.len());
     let (number, unit) = size.split_at(split);
-    let number: f64 = number.parse().ok()?;
     let unit = unit.trim();
     let &(_, factor) = UNITS.iter().find(|(name, _)| *name == unit)?;
-    Some((number * factor as f64).round() as u64)
+    // `1.21` as 121 hundredths, so no float rounds it
+    let (whole, fraction) = number.split_once('.').unwrap_or((number, ""));
+    if whole.is_empty() && fraction.is_empty() {
+        return None;
+    }
+    let digits: u128 = format!("{whole}{fraction}").parse().ok()?;
+    let scale = 10_u128.checked_pow(u32::try_from(fraction.len()).ok()?)?;
+    let bytes = digits.checked_mul(u128::from(factor))?;
+    u64::try_from((bytes + scale / 2) / scale).ok()
 }
 
 /// Both sides of docker's `1.2kB / 648B`

@@ -37,7 +37,8 @@ const CROWDED_GRAPHS_HEIGHT: u16 = 7;
 const MIN_CROWDED_HEIGHT: u16 = 14;
 /// A graph's bars, from an empty cell to a full one in eighths
 const EIGHTHS: [&str; 9] = [" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
-const EIGHTHS_PER_CELL: usize = EIGHTHS.len() - 1;
+/// One less than `EIGHTHS`, which starts with the empty cell; a `u8`, so it converts to a float without loss
+const EIGHTHS_PER_CELL: u8 = 8;
 /// The CPU graph's top is at least this, so an idle container's graph stays low
 const MIN_CPU_TOP: f64 = 5.0;
 /// Room above the CPU peak
@@ -438,36 +439,27 @@ fn draw_graphs(buf: &mut Buffer, area: Rect, app: &App, container: &Container) {
     let history = app.history.get(&container.id).unwrap_or(&empty);
     let width = usize::from(area.width);
     let cpu: Vec<f64> = recent(&history.cpu, width).collect();
-    #[allow(clippy::cast_precision_loss)]
-    let memory: Vec<f64> = recent(&history.memory, width)
-        .map(|bytes| bytes as f64)
-        .collect();
+    let memory: Vec<f64> = recent(&history.memory, width).map(format::kib).collect();
     // Dim without current stats
     let color = |color: Color| if stats.is_some() { color } else { theme.dim };
     let usage_line = area.height >= MIN_USAGE_LINE_HEIGHT;
     let graph_height = ((area.height - 2 - u16::from(usage_line)) / 2).max(1);
 
     let peak = cpu.iter().copied().fold(0.0, f64::max);
-    let area = labeled_graph(
-        buf,
-        area,
-        graph_height,
-        &cpu_label(&theme, stats, peak),
-        &cpu,
-        cpu_range(peak),
-        color(theme.cpu),
-        &theme,
-    );
-    let area = labeled_graph(
-        buf,
-        area,
-        graph_height,
-        &memory_label(&theme, stats),
-        &memory,
-        memory_range(&memory),
-        color(theme.memory),
-        &theme,
-    );
+    let cpu = Graph {
+        label: cpu_label(&theme, stats, peak),
+        values: &cpu,
+        range: cpu_range(peak),
+        color: color(theme.cpu),
+    };
+    let area = labeled_graph(buf, area, graph_height, &cpu, &theme);
+    let memory = Graph {
+        label: memory_label(&theme, stats),
+        values: &memory,
+        range: memory_range(&memory),
+        color: color(theme.memory),
+    };
+    let area = labeled_graph(buf, area, graph_height, &memory, &theme);
     if usage_line && area.height > 0 {
         put_line(
             buf,
@@ -553,26 +545,24 @@ fn memory_range(memory: &[f64]) -> (f64, f64) {
     (low, high)
 }
 
-/// A label over a graph, the area below them
-#[allow(clippy::too_many_arguments)]
-fn labeled_graph(
-    buf: &mut Buffer,
-    area: Rect,
-    height: u16,
-    label: &Line,
-    values: &[f64],
-    (low, high): (f64, f64),
+/// What a graph shows: its label line, its values from the oldest, the range they're drawn in, and its color
+struct Graph<'a> {
+    label: Line<'static>,
+    values: &'a [f64],
+    range: (f64, f64),
     color: Color,
-    theme: &Theme,
-) -> Rect {
-    put_line(buf, area.x, area.y, label, area.right());
+}
+
+/// A label over a graph, the area below them
+fn labeled_graph(buf: &mut Buffer, area: Rect, height: u16, graph: &Graph, theme: &Theme) -> Rect {
+    put_line(buf, area.x, area.y, &graph.label, area.right());
     let graph_area = Rect::new(
         area.x,
         area.y + 1,
         area.width,
         height.min(area.height.saturating_sub(1)),
     );
-    graph(buf, graph_area, values, low, high, color, theme.stripe);
+    draw_bars(buf, graph_area, graph, theme.stripe);
     let used = (height + 1).min(area.height);
     Rect {
         y: area.y + used,
@@ -582,25 +572,13 @@ fn labeled_graph(
 }
 
 /// Bars in eighths of a cell, the newest on the right
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss
-)]
-fn graph(
-    buf: &mut Buffer,
-    area: Rect,
-    values: &[f64],
-    low: f64,
-    high: f64,
-    color: Color,
-    background: Color,
-) {
-    fill(buf, area, color, background);
+fn draw_bars(buf: &mut Buffer, area: Rect, graph: &Graph, background: Color) {
+    let (low, high) = graph.range;
+    fill(buf, area, graph.color, background);
     let height = f64::from(area.height);
-    let per_cell = EIGHTHS_PER_CELL as f64;
-    let offset = usize::from(area.width).saturating_sub(values.len());
-    for (i, &value) in values.iter().enumerate() {
+    let per_cell = f64::from(EIGHTHS_PER_CELL);
+    let offset = usize::from(area.width).saturating_sub(graph.values.len());
+    for (i, &value) in graph.values.iter().enumerate() {
         let x = area.x + size(offset + i);
         if x >= area.right() {
             break;
@@ -614,10 +592,14 @@ fn graph(
             if left <= 0.0 {
                 break;
             }
-            let symbol = EIGHTHS[(left as usize).min(EIGHTHS_PER_CELL)];
+            // The most eighths not above what's left, a full cell at most
+            let eighths_here = (0..=EIGHTHS_PER_CELL)
+                .rev()
+                .find(|&n| f64::from(n) <= left)
+                .unwrap_or(0);
             buf[(x, area.bottom() - 1 - row)]
-                .set_symbol(symbol)
-                .set_style(Style::new().fg(color));
+                .set_symbol(EIGHTHS[usize::from(eighths_here)])
+                .set_style(Style::new().fg(graph.color));
         }
     }
 }

@@ -16,3 +16,8 @@ fn cuts_lines_with_an_ellipsis() {
     assert_eq!(cut(&line, 14).to_string(), "label    漢字…");
     assert_eq!(cut(&line, 13).to_string(), "label    漢…");
 }
+
+#[test]
+fn eighths_cover_a_cell() {
+    assert_eq!(EIGHTHS.len(), usize::from(EIGHTHS_PER_CELL) + 1);
+}

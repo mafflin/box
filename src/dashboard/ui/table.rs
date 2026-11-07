@@ -355,13 +355,15 @@ pub fn state_color(theme: &Theme, container: &Container) -> Color {
     }
 }
 
-#[allow(clippy::cast_precision_loss)]
+/// `used` of `limit`, 0 without a limit
 pub fn fraction(used: u64, limit: u64) -> f64 {
+    /// In thousandths, so it converts to a float without loss; plenty for the 50% and 80% colors
+    const PARTS: u32 = 1000;
     if limit == 0 {
-        0.0
-    } else {
-        used as f64 / limit as f64
+        return 0.0;
     }
+    let parts = u128::from(used) * u128::from(PARTS) / u128::from(limit);
+    f64::from(u32::try_from(parts).unwrap_or(u32::MAX)) / f64::from(PARTS)
 }
 
 fn images(app: &App, rows: &[usize]) -> (Vec<Column>, Vec<bool>) {

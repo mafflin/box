@@ -234,23 +234,27 @@ pub fn snapshot() -> Snapshot {
     }
 }
 
-/// Usage that ends at the given values, with a wavy history before
-#[allow(
-    clippy::cast_precision_loss,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
-)]
+/// Usage that ends at the given values, with a wavy history before: up and down every `WAVE` steps
 fn stats(app: &mut App, id: &str, cpu: f64, memory: u64, memory_limit: u64) {
+    /// Steps from the bottom of the wave to its top
+    const WAVE: u32 = 6;
     for step in 0..80_u32 {
-        let wave = (f64::from(step) / 4.0).sin().abs();
+        // 0 to `WAVE` and back
+        let wave = WAVE - (step % (2 * WAVE)).abs_diff(WAVE);
         let last = step == 79;
         let stats = Stats {
             id: id.into(),
-            cpu: if last { cpu } else { cpu * (0.3 + 1.4 * wave) },
+            // From 30% to 170% of the last value
+            cpu: if last {
+                cpu
+            } else {
+                cpu * (0.3 + 1.4 * f64::from(wave) / f64::from(WAVE))
+            },
+            // From 90% to 100% of it
             memory: if last {
                 memory
             } else {
-                (memory as f64 * (0.9 + 0.1 * wave)) as u64
+                memory * u64::from(9 * WAVE + wave) / u64::from(10 * WAVE)
             },
             memory_limit,
             network: (75 * MIB, 10 * MIB),

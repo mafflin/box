@@ -22,12 +22,12 @@ expression: screen
 ╰───────────│  i           details bottom/right/off   d           remove if unused     │───── 1/5 ─╯
 ╭─ api ─────│  p           prune                                                       │───────────╮
 │ image    a│  q           quit                                                        │6%         │
-│ status   U│                                                                          │▄▃▁        │
-│ ip       1│                                                                          │███▅▂  ▂▆▄ │
-│          1│                                                                          │█████▅▆███ │
+│ status   U│                                                                          │       ▂▅  │
+│ ip       1│                                                                          │▁   ▁▄▇██▄ │
+│          1│                                                                          │█▇▄▇██████ │
 │ user     a│  any key closes                                                          │           │
-│ workdir  /╰──────────────────────────────────────────────────────────────────────────╯▃▂       ▃ │
-│ ports    3000->3000/tcp                                           ▁▃▅▇██████▇▅▃▁▄▆███████▆▄▂▂▅▇█ │
+│ workdir  /╰──────────────────────────────────────────────────────────────────────────╯       ▁▃▃ │
+│ ports    3000->3000/tcp                                           ▄▆█████▆▄▃▁▃▄▆█████▆▄▃▁▃▄▆████ │
 │ mounts   /home/me/.lo…/proxy.conf:/etc/acme/proxy/proxy.conf:ro   ██████████████████████████████ │
 │          /home/me/work/api:/app                                   NET ↓ 75M  ↑ 10M   PIDS 12     │
 │          bundle:/usr/local/bundle                                                                │
