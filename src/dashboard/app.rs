@@ -6,10 +6,11 @@ use std::time::{Duration, Instant};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::commands::PruneTarget;
-use crate::docker::{Container, Image, Stats, Volume};
+use crate::docker::{self, Container, Image, Stats, Volume};
 use crate::format;
 use crate::theme::Theme;
 
+/// Stats kept for each container's graphs, one per update docker sends
 const HISTORY: usize = 240;
 const MAX_LOG_LINES: usize = 5000;
 const MAX_LOG_LINE_BYTES: usize = 4096;
@@ -674,7 +675,7 @@ impl App {
         let containers = self
             .containers
             .iter()
-            .filter(|container| matches!(container.state.as_str(), "exited" | "created"))
+            .filter(|container| PruneTarget::STOPPED_STATES.contains(&container.state.as_str()))
             .count();
         let volumes = self
             .volumes
@@ -1220,7 +1221,7 @@ fn page(rows: usize) -> isize {
 
 fn run(args: &[&str], container: Option<(&String, Pending)>, done: String) -> Task {
     Task::Run {
-        args: args.iter().map(ToString::to_string).collect(),
+        args: docker::args(args),
         container: container.map(|(id, pending)| (id.clone(), pending)),
         done,
     }

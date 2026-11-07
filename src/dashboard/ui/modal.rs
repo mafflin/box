@@ -5,7 +5,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::text::{Line, Span};
 
-use super::{badge, bold, fg, fill, fit, padded, put, put_line, rounded_box, width};
+use super::{badge, bold, fg, fill, fit, padded, put, put_line, rounded_box, size, width};
 use crate::commands::PruneTarget;
 use crate::dashboard::app::{App, Confirm, Modal, PruneDialog};
 use crate::format::human_size;
@@ -131,7 +131,7 @@ fn confirmation(buf: &mut Buffer, area: Rect, theme: &Theme, confirm: &Confirm) 
     };
     let text_width = width(&confirm.question).max(width(&confirm.command));
     let dialog_width = (text_width + CONFIRM_MARGIN).max(CONFIRM_MIN_WIDTH);
-    let dialog_width = u16::try_from(dialog_width).unwrap_or(u16::MAX);
+    let dialog_width = size(dialog_width);
     let inner = dialog(
         buf,
         area,

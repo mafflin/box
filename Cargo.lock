@@ -100,7 +100,7 @@ dependencies = [
 
 [[package]]
 name = "box"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "anyhow",
  "insta",
@@ -109,6 +109,8 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
+ "unicode-segmentation",
+ "unicode-width",
 ]
 
 [[package]]

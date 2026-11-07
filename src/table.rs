@@ -5,7 +5,9 @@ use ratatui::style::Color;
 use crate::format::Highlighted;
 use crate::theme::Theme;
 
+/// The SGR parameter for bold, the titles' style
 const BOLD: &str = "1";
+/// Between two columns
 const COLUMN_GAP: &str = "  ";
 
 /// Its color is the theme's for its field

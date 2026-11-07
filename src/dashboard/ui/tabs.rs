@@ -4,11 +4,9 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
 
-use super::{badge, bold, fg, put, put_right};
+use super::{BAR_MARGIN, badge, bold, fg, put, put_right};
 use crate::dashboard::app::{App, View};
 
-/// Before the first tab, and after the last thing on the right
-const MARGIN: u16 = 1;
 /// Between two tabs
 const TAB_GAP: u16 = 1;
 /// Between two things on the right
@@ -29,7 +27,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App) {
 fn draw_tabs(buf: &mut Buffer, area: Rect, app: &App) -> u16 {
     let theme = app.theme;
     let counts = [app.containers.len(), app.images.len(), app.volumes.len()];
-    let mut x = area.x + MARGIN;
+    let mut x = area.x + BAR_MARGIN;
     for view in View::ALL {
         let label = format!(" {} {} ", view.title(), counts[view.index()]);
         let style = if view == app.view {
@@ -89,9 +87,9 @@ fn draw_status(buf: &mut Buffer, area: Rect, x: u16, mut groups: Vec<Group>) {
     let room = usize::from(area.right().saturating_sub(x));
     while !groups.is_empty() {
         let line = status_line(&groups);
-        let width = line.iter().map(Span::width).sum::<usize>() + usize::from(MARGIN);
+        let width = line.iter().map(Span::width).sum::<usize>() + usize::from(BAR_MARGIN);
         if width < room {
-            put_right(buf, area.right().saturating_sub(MARGIN), area.y, &line);
+            put_right(buf, area.right().saturating_sub(BAR_MARGIN), area.y, &line);
             return;
         }
         let first = groups

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use super::{CONTAINER_IMAGE_FORMAT, all_containers};
 use crate::Result;
-use crate::docker::{self, Docker, reference};
+use crate::docker::{self, Docker, JSON_FORMAT, reference};
 use crate::format::{self, short_id};
 use crate::table::{self, Cell, Column, cell, lines};
 use crate::theme::Theme;
@@ -61,7 +61,7 @@ const VOLUME_FIELDS: [&str; 3] = ["{{.Name}}", "{{.Driver}}", "{{.CreatedAt}}"];
 /// Running containers, with their IPs and mounts instead of the working directory when extended; those that went
 /// away since docker ps left out
 pub fn containers(docker: &impl Docker, extended: bool, theme: &Theme) -> Result<String> {
-    let ps = docker.lines(&["ps", "--no-trunc", "--format", "{{json .}}"])?;
+    let ps = docker.lines(&["ps", "--no-trunc", "--format", JSON_FORMAT])?;
     let ids = docker::ps_ids(&ps);
     if ids.is_empty() {
         return Ok(String::new());

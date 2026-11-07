@@ -62,7 +62,7 @@ fn partial_output(args: &[&str]) -> Result<String> {
     let output = command(args)
         .stdin(Stdio::null())
         .output()
-        .map_err(|e| anyhow!("can't run docker: {e}"))?;
+        .map_err(|e| anyhow!(cant_run(&e)))?;
     if output.status.success() || !output.stdout.is_empty() {
         return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
     }
@@ -77,6 +77,16 @@ pub fn inspect_all(command: &[&str], ids: &[String]) -> Result<String> {
     let mut args = command.to_vec();
     args.extend(ids.iter().map(String::as_str));
     partial_output(&args)
+}
+
+/// Arguments for a command run later, on another thread
+pub fn args(args: &[&str]) -> Vec<String> {
+    args.iter().map(ToString::to_string).collect()
+}
+
+/// Why docker couldn't start, like when it isn't installed
+pub fn cant_run(error: &std::io::Error) -> String {
+    format!("can't run docker: {error}")
 }
 
 /// Docker is installed and its daemon running
@@ -108,7 +118,7 @@ fn captured(args: &[&str]) -> Result<Output> {
     let output = command(args)
         .stdin(Stdio::null())
         .output()
-        .map_err(|e| anyhow!("can't run docker: {e}"))?;
+        .map_err(|e| anyhow!(cant_run(&e)))?;
     if output.status.success() {
         Ok(output)
     } else {

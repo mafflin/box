@@ -8,13 +8,19 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 
 use super::table::{fraction, state_color};
-use super::{NO_VALUE, bold, fg, fill, padded, put, put_line, rounded_box};
+use super::{NO_VALUE, bold, fg, fill, head, padded, put, put_line, rounded_box, size};
 use crate::dashboard::app::{App, History, View};
 use crate::docker::{Container, Image, Stats, Volume};
 use crate::format::{self, compact_bytes};
 use crate::theme::Theme;
 
+/// The labels' column, like `workdir  `
 const LABEL_WIDTH: usize = 9;
+/// Narrower details show nothing
+const MIN_INNER_WIDTH: u16 = 4;
+/// Smaller graphs aren't drawn: a label and a row of bars at the least
+const MIN_GRAPH_WIDTH: u16 = 10;
+const MIN_GRAPH_HEIGHT: u16 = 2;
 /// What the graphs keep beside a container's details, for their labels
 const MIN_GRAPHS_WIDTH: u16 = 30;
 /// Between the details and the graphs
@@ -29,7 +35,9 @@ const MIN_GRAPHS_HEIGHT: u16 = 5;
 const CROWDED_GRAPHS_HEIGHT: u16 = 7;
 /// How tall the pane must be for that; below it, there are no graphs
 const MIN_CROWDED_HEIGHT: u16 = 14;
+/// A graph's bars, from an empty cell to a full one in eighths
 const EIGHTHS: [&str; 9] = [" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+const EIGHTHS_PER_CELL: usize = EIGHTHS.len() - 1;
 /// The CPU graph's top is at least this, so an idle container's graph stays low
 const MIN_CPU_TOP: f64 = 5.0;
 /// Room above the CPU peak
@@ -47,7 +55,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App, bottom: bool) {
     let row = selected.map(|position| rows[position]);
     let title = row.map_or_else(String::new, |row| title(app, row));
     let inner = padded(rounded_box(buf, area, theme.border, &title, fg(theme.text)));
-    if inner.width < 4 || inner.height == 0 {
+    if inner.width < MIN_INNER_WIDTH || inner.height == 0 {
         return;
     }
     let Some(row) = row else {
@@ -81,7 +89,7 @@ pub fn height(app: &mut App) -> u16 {
         View::Images => image_lines(app, &app.images[row]).len(),
         View::Volumes => volume_lines(app, &app.volumes[row]).len(),
     };
-    u16::try_from(lines).unwrap_or(u16::MAX).saturating_add(2)
+    size(lines).saturating_add(2)
 }
 
 /// The selected container's name, image's reference or volume's short name
@@ -150,15 +158,13 @@ fn text_width(longest: usize, width: u16) -> u16 {
     let widest = width
         .saturating_sub(MIN_GRAPHS_WIDTH + GRAPHS_GAP)
         .max(half);
-    u16::try_from(longest)
-        .unwrap_or(u16::MAX)
-        .clamp(half, widest)
+    size(longest).clamp(half, widest)
 }
 
 /// What the text leaves, up to `MAX_GRAPHS_HEIGHT`; when that's too little, `CROWDED_GRAPHS_HEIGHT` in a
 /// pane tall enough, which cuts the text, else none
 fn graphs_height(text_lines: usize, height: u16) -> u16 {
-    let text = u16::try_from(text_lines).unwrap_or(u16::MAX);
+    let text = size(text_lines);
     let graphs = height.saturating_sub(text + 1).min(MAX_GRAPHS_HEIGHT);
     if graphs >= MIN_GRAPHS_HEIGHT {
         graphs
@@ -389,7 +395,7 @@ fn draw_lines(buf: &mut Buffer, area: Rect, lines: &[Line], theme: &Theme) {
         put_line(buf, area.x, y, &line, area.right());
     }
     if shown < lines.len() && height > 0 {
-        let y = area.y + u16::try_from(shown).unwrap_or(0);
+        let y = area.y + size(shown);
         let more = format!("… {} more", lines.len() - shown);
         put(buf, area.x, y, &more, fg(theme.dim), area.right());
     }
@@ -407,10 +413,15 @@ fn cut<'a>(line: &Line<'a>, width: usize) -> Line<'a> {
         if room == 0 {
             break;
         }
-        let kept: String = span.content.chars().take(room).collect();
-        room -= kept.chars().count();
+        let (kept, used) = head(&span.content, room);
+        let whole = kept.len() == span.content.len();
+        room -= used;
         style = span.style;
         spans.push(Span::styled(kept, span.style));
+        // A character too wide for what's left ends it
+        if !whole {
+            break;
+        }
     }
     spans.push(Span::styled("…", style));
     Line::from(spans)
@@ -418,7 +429,7 @@ fn cut<'a>(line: &Line<'a>, width: usize) -> Line<'a> {
 
 /// CPU and memory over time, with network and PIDs under them when there's room
 fn draw_graphs(buf: &mut Buffer, area: Rect, app: &App, container: &Container) {
-    if area.width < 10 || area.height < 2 {
+    if area.width < MIN_GRAPH_WIDTH || area.height < MIN_GRAPH_HEIGHT {
         return;
     }
     let theme = app.theme;
@@ -587,22 +598,23 @@ fn graph(
 ) {
     fill(buf, area, color, background);
     let height = f64::from(area.height);
+    let per_cell = EIGHTHS_PER_CELL as f64;
     let offset = usize::from(area.width).saturating_sub(values.len());
     for (i, &value) in values.iter().enumerate() {
-        let x = area.x + u16::try_from(offset + i).unwrap_or(u16::MAX);
+        let x = area.x + size(offset + i);
         if x >= area.right() {
             break;
         }
-        let mut eighths = ((value - low) / (high - low)).clamp(0.0, 1.0) * height * 8.0;
+        let mut eighths = ((value - low) / (high - low)).clamp(0.0, 1.0) * height * per_cell;
         if value > low && eighths < 1.0 {
             eighths = 1.0;
         }
         for row in 0..area.height {
-            let left = (eighths - f64::from(row) * 8.0).round();
+            let left = (eighths - f64::from(row) * per_cell).round();
             if left <= 0.0 {
                 break;
             }
-            let symbol = EIGHTHS[(left as usize).min(8)];
+            let symbol = EIGHTHS[(left as usize).min(EIGHTHS_PER_CELL)];
             buf[(x, area.bottom() - 1 - row)]
                 .set_symbol(symbol)
                 .set_style(Style::new().fg(color));

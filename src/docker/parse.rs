@@ -10,6 +10,8 @@ use crate::Result;
 use crate::format::{self, parse_size, parse_size_pair};
 
 pub const UNTAGGED: &str = "<none>";
+/// For `--format`: an object per line, as the parsers here read
+pub const JSON_FORMAT: &str = "{{json .}}";
 /// The most of a label or command that's kept
 const MAX_TEXT: usize = 1000;
 

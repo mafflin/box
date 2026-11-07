@@ -145,7 +145,7 @@ fn open_shell(terminal: &mut DefaultTerminal, input: &Input, id: &str) -> Result
     Ok(match ran {
         Ok(output) if output.status.success() => None,
         Ok(output) => docker_error(&output.stderr),
-        Err(e) => Some(format!("can't run docker: {e}")),
+        Err(e) => Some(docker::cant_run(&e)),
     })
 }
 

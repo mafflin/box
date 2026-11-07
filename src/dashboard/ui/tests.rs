@@ -194,4 +194,16 @@ fn fits_text() {
     assert_eq!(fit("abc", 5, true), "  abc");
     assert_eq!(fit("abcdef", 4, false), "abc…");
     assert_eq!(fit("abc", 0, false), "");
+    // By the columns text takes, two for each of these
+    assert_eq!(fit("漢字", 5, false), "漢字 ");
+    assert_eq!(fit("漢字漢字", 5, false), "漢字…");
+    // A character too wide for what's left leaves a space
+    assert_eq!(fit("漢字漢字", 6, true), " 漢字…");
+    // Emoji made of several characters, kept or left whole
+    assert_eq!(fit("☁️☁️☁️☁️", 6, false), "☁️☁️… ");
+    assert_eq!(fit("❤️ love it", 6, false), "❤️ lo…");
+    assert_eq!(fit("👨‍👩‍👧 family", 6, false), "👨‍👩‍👧 fa…");
+    for text in ["☁️☁️☁️☁️", "❤️ love it", "👨‍👩‍👧 family"] {
+        assert_eq!(super::width(&fit(text, 6, false)), 6, "{text}");
+    }
 }

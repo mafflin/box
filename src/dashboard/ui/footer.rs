@@ -7,7 +7,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::text::Span;
 
-use super::{bold, fg, fill, put, put_right, width};
+use super::{BAR_MARGIN, bold, fg, fill, put, put_right, size, width};
 use crate::dashboard::app::{App, Logs, Tone, View};
 use crate::docker::Container;
 use crate::theme::Theme;
@@ -18,8 +18,6 @@ const SEPARATOR: &str = "  │  ";
 const HINT_GAP: u16 = 2;
 /// Between a key and what it does
 const KEY_GAP: u16 = 1;
-/// Before the first hint and after the last thing on the right
-const MARGIN: u16 = 1;
 /// The end of the filter being typed
 const CURSOR: &str = "▏";
 /// Between the filter and the hints
@@ -64,12 +62,12 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
     let toast = toast(app);
     let (mut groups, pinned) = hints(app);
     let right = match (&toast, pinned) {
-        (Some((text, _)), _) => width(text) + usize::from(MARGIN),
-        (None, true) => line_width(&[&PINNED[..]]) + usize::from(MARGIN),
+        (Some((text, _)), _) => width(text) + usize::from(BAR_MARGIN),
+        (None, true) => line_width(&[&PINNED[..]]) + usize::from(BAR_MARGIN),
         (None, false) => 0,
     };
 
-    let mut x = area.x + MARGIN;
+    let mut x = area.x + BAR_MARGIN;
     if app.filtering {
         x = draw_filter(buf, x, area, app) + FILTER_GAP;
     }
@@ -82,14 +80,12 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
     if let Some((text, color)) = toast {
         put_right(
             buf,
-            area.right().saturating_sub(MARGIN),
+            area.right().saturating_sub(BAR_MARGIN),
             area.y,
             &[Span::styled(text, bold(color))],
         );
     } else if pinned {
-        let start = area
-            .right()
-            .saturating_sub(u16::try_from(right).unwrap_or(0));
+        let start = area.right().saturating_sub(size(right));
         draw_hints(buf, start.max(x), area, &[&PINNED[..]], &theme);
     }
 }

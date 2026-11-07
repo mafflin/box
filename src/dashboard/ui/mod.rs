@@ -12,6 +12,8 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use super::app::{App, Details};
 use crate::theme::Theme;
@@ -30,6 +32,8 @@ const MIN_BODY_WIDTH_FOR_RIGHT: u16 = 90;
 const RIGHT_DETAILS_PERCENT: u16 = 34;
 const MIN_RIGHT_DETAILS_WIDTH: u16 = 36;
 const MAX_RIGHT_DETAILS_WIDTH: u16 = 64;
+/// Before the first thing on the tabs line and the footer, and after the last
+const BAR_MARGIN: u16 = 1;
 /// Shown for what has no value
 const NO_VALUE: &str = "—";
 
@@ -141,14 +145,14 @@ fn put_line(buf: &mut Buffer, x: u16, y: u16, line: &Line, end: u16) -> u16 {
 
 /// Spans that end at `end`
 fn put_right(buf: &mut Buffer, end: u16, y: u16, spans: &[Span]) {
-    let width = u16::try_from(spans.iter().map(Span::width).sum::<usize>()).unwrap_or(u16::MAX);
+    let width = size(spans.iter().map(Span::width).sum());
     let x = end.saturating_sub(width).max(buf.area.x);
     put_line(buf, x, y, &Line::from(spans.to_vec()), end);
 }
 
 /// `text` at the right of the border's row `y`, a cell before the corner
 fn put_on_border(buf: &mut Buffer, area: Rect, y: u16, text: &str, style: Style) {
-    let text_width = u16::try_from(width(text)).unwrap_or(u16::MAX);
+    let text_width = size(width(text));
     let x = area.right().saturating_sub(text_width.saturating_add(2));
     put(buf, x, y, text, style, area.right().saturating_sub(1));
 }
@@ -232,21 +236,42 @@ fn width(text: &str) -> usize {
 }
 
 /// Padded or cut with `…` to `width` columns
-fn fit(text: &str, width: usize, right_aligned: bool) -> String {
-    let length = text.chars().count();
-    if length > width {
-        if width == 0 {
-            return String::new();
-        }
-        let cut: String = text.chars().take(width - 1).collect();
-        return format!("{cut}…");
-    }
-    let padding = " ".repeat(width - length);
-    if right_aligned {
-        padding + text
+fn fit(text: &str, columns: usize, right_aligned: bool) -> String {
+    let (shown, shown_width) = if width(text) <= columns {
+        (text.to_string(), width(text))
+    } else if columns == 0 {
+        return String::new();
     } else {
-        text.to_string() + &padding
+        let (head, used) = head(text, columns - 1);
+        (format!("{head}…"), used + 1)
+    };
+    let padding = " ".repeat(columns - shown_width);
+    if right_aligned {
+        padding + &shown
+    } else {
+        shown + &padding
     }
+}
+
+/// `n` as a terminal size, the largest one when it's more
+fn size(n: usize) -> u16 {
+    u16::try_from(n).unwrap_or(u16::MAX)
+}
+
+/// As much of `text`'s start as fits in `room` columns, and how many of them it takes; by what the terminal
+/// draws as one character, so an emoji made of several, like `❤️`, is kept or left whole
+fn head(text: &str, room: usize) -> (String, usize) {
+    let mut kept = String::new();
+    let mut used = 0;
+    for grapheme in text.graphemes(true) {
+        let grapheme_width = grapheme.width();
+        if used + grapheme_width > room {
+            break;
+        }
+        kept.push_str(grapheme);
+        used += grapheme_width;
+    }
+    (kept, used)
 }
 
 #[cfg(test)]

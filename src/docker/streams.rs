@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use super::run::command;
 
+/// Before starting a stream like `docker stats` again after it ended
 const RESTART_DELAY: Duration = Duration::from_secs(2);
 
 /// The docker processes still running, by key

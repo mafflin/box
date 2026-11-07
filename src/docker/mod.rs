@@ -5,10 +5,10 @@ mod run;
 pub mod streams;
 
 pub use parse::{
-    Container, Image, Mount, Stats, Volume, containers, image_ids, images, is_change, ps_ids,
-    reference, stats, volumes,
+    Container, Image, JSON_FORMAT, Mount, Stats, Volume, containers, image_ids, images, is_change,
+    ps_ids, reference, stats, volumes,
 };
-pub use run::{Captured, Docker, Terminal, check, command, inspect_all};
+pub use run::{Captured, Docker, Terminal, args, cant_run, check, command, inspect_all};
 
 #[cfg(test)]
 pub use run::fake;

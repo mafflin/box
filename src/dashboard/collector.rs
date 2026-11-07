@@ -10,13 +10,15 @@ use std::time::{Duration, Instant};
 use super::app::{Action, LogLine, Snapshot, Task};
 use crate::commands::prune;
 use crate::docker::streams::{self, Children};
-use crate::docker::{self, Captured, Docker};
+use crate::docker::{self, Captured, Docker, JSON_FORMAT};
 
 /// How often to look again when nothing happened
 const REFRESH: Duration = Duration::from_secs(5);
 /// Events often come in bursts, like a compose project starting
 const SETTLE: Duration = Duration::from_millis(150);
+/// Between two looks, however many requests come
 const MIN_INTERVAL: Duration = Duration::from_secs(1);
+/// The lines of logs shown when they open, before new ones follow
 const LOG_TAIL: &str = "500";
 
 pub struct Collector {
@@ -41,7 +43,7 @@ impl Collector {
         let stats = actions.clone();
         streams::follow(
             Arc::clone(&children),
-            args(&["stats", "--no-trunc", "--format", "{{json .}}"]),
+            docker::args(&["stats", "--no-trunc", "--format", JSON_FORMAT]),
             Arc::clone(&running),
             move |line| match docker::stats(&String::from_utf8_lossy(line)) {
                 Some(update) => stats.send(Action::Stats(update)).is_ok(),
@@ -54,7 +56,7 @@ impl Collector {
         let on_end = refresh.clone();
         streams::follow(
             Arc::clone(&children),
-            args(&["events", "--format", "{{json .}}"]),
+            docker::args(&["events", "--format", JSON_FORMAT]),
             Arc::clone(&running),
             move |line| {
                 !docker::is_change(&String::from_utf8_lossy(line)) || on_event.send(()).is_ok()
@@ -91,7 +93,7 @@ impl Collector {
         let ended = self.actions.clone();
         let started = streams::run_once(
             &self.children,
-            &args(&["logs", "--follow", "--timestamps", "--tail", LOG_TAIL, id]),
+            &docker::args(&["logs", "--follow", "--timestamps", "--tail", LOG_TAIL, id]),
             move |line| {
                 lines
                     .send(Action::Log {
@@ -111,7 +113,7 @@ impl Collector {
             Err(e) => {
                 let _ = self.actions.send(Action::Log {
                     session,
-                    line: LogLine::parse(format!("can't run docker logs: {e}").as_bytes()),
+                    line: LogLine::parse(docker::cant_run(&e).as_bytes()),
                 });
                 let _ = self.actions.send(Action::LogEnded { session });
             }
@@ -135,10 +137,6 @@ impl Drop for Collector {
     fn drop(&mut self) {
         self.stop();
     }
-}
-
-fn args(args: &[&str]) -> Vec<String> {
-    args.iter().map(ToString::to_string).collect()
 }
 
 /// Looks now, then every few seconds, or soon after a request
@@ -185,9 +183,9 @@ fn host_platform() -> Option<String> {
 /// Containers, images and their details, and volumes
 fn snapshot(host: &str) -> Result<Snapshot, String> {
     let read = || -> crate::Result<Snapshot> {
-        let ps = Captured.lines(&["ps", "--all", "--no-trunc", "--format", "{{json .}}"])?;
+        let ps = Captured.lines(&["ps", "-a", "--no-trunc", "--format", JSON_FORMAT])?;
         let inspect = docker::inspect_all(&["inspect"], &docker::ps_ids(&ps))?;
-        let images = Captured.lines(&["image", "ls", "--no-trunc", "--format", "{{json .}}"])?;
+        let images = Captured.lines(&["image", "ls", "--no-trunc", "--format", JSON_FORMAT])?;
         // Only details, the images show without them
         let image_inspect = docker::inspect_all(&["image", "inspect"], &docker::image_ids(&images))
             .unwrap_or_default();

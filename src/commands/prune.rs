@@ -15,6 +15,8 @@ pub enum PruneTarget {
 impl PruneTarget {
     /// Containers first, as removing them leaves volumes and images dangling
     pub const ORDER: [Self; 3] = [Self::Containers, Self::Volumes, Self::Images];
+    /// The states of the containers it removes: stopped, or created and never started
+    pub const STOPPED_STATES: [&str; 2] = ["exited", "created"];
 
     /// `all` is every target
     pub fn from_name(name: &str) -> Option<Vec<Self>> {
@@ -27,18 +29,25 @@ impl PruneTarget {
         }
     }
 
-    fn list(self) -> &'static [&'static str] {
+    /// What it would remove, as docker lists them
+    fn list(self, docker: &impl Docker) -> Result<Vec<String>> {
         match self {
-            Self::Containers => &[
-                "ps",
-                "--filter",
-                "status=exited",
-                "--filter",
-                "status=created",
-                "-q",
-            ],
-            Self::Volumes => &["volume", "ls", "--filter", "dangling=true", "-q"],
-            Self::Images => &["images", "--filter", "dangling=true", "-q", "--no-trunc"],
+            Self::Containers => {
+                let filters: Vec<String> = Self::STOPPED_STATES
+                    .iter()
+                    .map(|state| format!("status={state}"))
+                    .collect();
+                let mut args = vec!["ps"];
+                for filter in &filters {
+                    args.extend(["--filter", filter]);
+                }
+                args.push("-q");
+                docker.lines(&args)
+            }
+            Self::Volumes => docker.lines(&["volume", "ls", "--filter", "dangling=true", "-q"]),
+            Self::Images => {
+                docker.lines(&["images", "--filter", "dangling=true", "-q", "--no-trunc"])
+            }
         }
     }
 
@@ -69,7 +78,7 @@ pub fn prune(docker: &impl Docker, targets: &[PruneTarget]) -> Result<Vec<(Prune
         .into_iter()
         .filter(|target| targets.contains(target))
     {
-        let mut items = docker.lines(target.list())?;
+        let mut items = target.list(docker)?;
         if target == PruneTarget::Images {
             let used = all_containers(docker, CONTAINER_IMAGE_FORMAT)?;
             items.retain(|image| !used.contains(image));

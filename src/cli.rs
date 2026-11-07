@@ -45,6 +45,9 @@ Usage: box stop
 Stops all running containers, use docker stop for one.
 ";
 
+/// Help's column of option names, like `-h, --help`
+const OPTION_NAMES_WIDTH: usize = 15;
+
 const BOX_FOOTER: &str = "Run 'box command --help' for a command's options.";
 
 struct Opt {
@@ -271,7 +274,7 @@ fn help(text: &str, opts: &[Opt], footer: Option<&str>) -> String {
     let mut help = format!("{text}\nOptions:\n");
     for opt in opts {
         let names = format!("-{}, --{}", opt.short, opt.long);
-        let _ = writeln!(help, "  {names:<15} {}", opt.description);
+        let _ = writeln!(help, "  {names:<OPTION_NAMES_WIDTH$} {}", opt.description);
     }
     if let Some(footer) = footer {
         let _ = write!(help, "\n{footer}\n");

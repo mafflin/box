@@ -4,7 +4,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 
-use super::{NO_VALUE, bold, fg, fill, fit, put, put_on_border, rounded_box};
+use super::{NO_VALUE, bold, fg, fill, fit, put, put_on_border, rounded_box, size, width};
 use crate::dashboard::app::{App, Pending, Sort, SortKey, View};
 use crate::docker::{Container, Image, Stats};
 use crate::format::{compact_bytes, short_id};
@@ -18,6 +18,7 @@ const LEAD: u16 = 1;
 const TRAIL: u16 = 1;
 /// The header and a row
 const MIN_INNER_HEIGHT: u16 = 2;
+/// Narrower tables show nothing
 const MIN_INNER_WIDTH: u16 = 8;
 /// So `width / flex` compares in whole numbers for flex 1 to 4
 const FLEX_SCALE: usize = 12;
@@ -191,8 +192,8 @@ fn draw_row(
 
 /// In the middle, a row below the header when there's room
 fn draw_empty(buf: &mut Buffer, body: Rect, message: &str, theme: &Theme) {
-    let width = u16::try_from(message.chars().count()).unwrap_or(0);
-    let x = body.x + body.width.saturating_sub(width) / 2;
+    let message_width = size(width(message));
+    let x = body.x + body.width.saturating_sub(message_width) / 2;
     let y = body.y + u16::from(body.height > 1);
     put(buf, x, y, message, fg(theme.dim), body.right());
 }
@@ -221,17 +222,17 @@ fn draw_cells(buf: &mut Buffer, area: Rect, columns: &[Column], cells: impl Iter
 }
 
 fn column_width(column: &Column) -> u16 {
-    u16::try_from(column.width).unwrap_or(u16::MAX)
+    size(column.width)
 }
 
 /// Each column as wide as its widest cell, then flexible ones narrowed until they fit
 fn fit_widths(columns: &mut [Column], headers: &[String], available: usize) {
     for (column, header) in columns.iter_mut().zip(headers) {
-        let header = header.chars().count();
+        let header = width(header);
         column.width = column
             .cells
             .iter()
-            .map(|(text, _)| text.chars().count())
+            .map(|(text, _)| width(text))
             .chain([header])
             .max()
             .unwrap_or(0);
