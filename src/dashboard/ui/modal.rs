@@ -7,8 +7,8 @@ use ratatui::text::{Line, Span};
 
 use super::{badge, bold, fg, fill, fit, padded, put, put_line, rounded_box, size, width};
 use crate::commands::PruneTarget;
-use crate::dashboard::app::{App, Confirm, Modal, PruneDialog};
-use crate::dashboard::keys::{self, names};
+use crate::dashboard::app::{App, Confirm, Modal, PruneDialog, SortKey};
+use crate::dashboard::keys::{self, either, names};
 use crate::format::human_size;
 use crate::theme::Theme;
 
@@ -16,7 +16,7 @@ use crate::theme::Theme;
 const INDENT: u16 = 1;
 
 const HELP_WIDTH: u16 = 76;
-const HELP_HEIGHT: u16 = 19;
+const HELP_HEIGHT: u16 = 21;
 /// Where the second column of keys starts
 const HELP_SECOND_COLUMN: u16 = 40;
 /// Where a key's description starts
@@ -33,51 +33,61 @@ const PRUNE_LABEL_WIDTH: usize = 20;
 const PRUNE_COUNT_WIDTH: usize = 4;
 
 /// A title and its keys with what they do
-type Section = (&'static str, Vec<(String, &'static str)>);
+type Section = (&'static str, Vec<(String, String)>);
 
-/// What the help shows, its keys from `keys`
-fn help_sections() -> [Section; 3] {
+/// What the help shows, its keys from `keys`: General and Sort on the left, the rest on the right
+fn help_sections() -> [Section; 4] {
     let key = |key: char| names(&[key]);
+    let line = |keys: String, what: &str| (keys, what.to_string());
     let general = vec![
-        (
-            format!("{} {}", keys::ARROWS, names(&[keys::DOWN, keys::UP])),
+        line(
+            either(&[keys::ARROWS, &names(&[keys::DOWN, keys::UP])]),
             "move",
         ),
-        (names(&[keys::TOP, keys::BOTTOM]), "top / bottom"),
-        (
-            format!("{} {}", keys::TAB, names(&keys::VIEW_KEYS)),
+        line(names(&[keys::TOP, keys::BOTTOM]), "top / bottom"),
+        line(
+            either(&[keys::TAB, &names(&keys::VIEW_KEYS)]),
             "switch view",
         ),
-        (key(keys::FILTER), "filter"),
-        (keys::ESC.to_string(), "clear filter"),
-        (
-            names(&[keys::SORT_CPU, keys::SORT_MEMORY, keys::SORT_NAME]),
-            "sort cpu / mem / name",
-        ),
-        (key(keys::SORT_SIZE), "sort size"),
-        (key(keys::SORT_TIME), "sort started / created"),
-        (key(keys::DETAILS), "details bottom/right/off"),
-        (key(keys::PRUNE), "prune"),
-        (key(keys::QUIT), "quit"),
+        line(key(keys::FILTER), "filter"),
+        line(keys::ESC.to_string(), "clear filter"),
+        line(key(keys::DETAILS), "details bottom/right/off"),
+        line(key(keys::PRUNE), "prune"),
+        line(key(keys::QUIT), "quit"),
     ];
+    // In the tabs line's words; time is when containers started, when images and volumes were created
+    let time = format!(
+        "{} / {}",
+        SortKey::Started.label(),
+        SortKey::Created.label()
+    );
+    let sort = [SortKey::Cpu, SortKey::Memory, SortKey::Name, SortKey::Size]
+        .into_iter()
+        .map(|sort| line(key(sort.key()), sort.label()))
+        .chain([line(key(keys::SORT_TIME), &time)])
+        .collect();
     let containers = vec![
-        (key(keys::STOP), "stop / start"),
-        (key(keys::RESTART), "restart"),
-        (key(keys::REMOVE), "remove"),
-        (
-            format!("{} {}", key(keys::LOGS), keys::ENTER),
+        line(key(keys::STOP), "stop / start"),
+        line(key(keys::RESTART), "restart"),
+        line(key(keys::REMOVE), "remove"),
+        line(
+            either(&[&key(keys::LOGS), keys::ENTER]),
             "logs (not for -it)",
         ),
-        (key(keys::SHELL), "shell (bash or sh)"),
-        (key(keys::SHOW_ALL), "show stopped"),
+        line(key(keys::SHELL), "shell (bash or sh)"),
+        line(key(keys::SHOW_ALL), "show stopped"),
     ];
-    let images_and_volumes = vec![(key(keys::REMOVE), "remove if unused")];
+    let images_and_volumes = vec![line(key(keys::REMOVE), "remove if unused")];
     [
         ("General", general),
+        ("Sort", sort),
         ("Containers", containers),
         ("Images · Volumes", images_and_volumes),
     ]
 }
+
+/// Where `help_sections` splits into the help's two columns
+const LEFT_SECTIONS: usize = 2;
 
 /// In `PruneTarget::ORDER`
 const PRUNE_LABELS: [&str; PruneTarget::ORDER.len()] =
@@ -104,12 +114,18 @@ fn help(buf: &mut Buffer, area: Rect, theme: &Theme) {
         theme.bar,
     );
     let sections = help_sections();
-    help_column(buf, inner, inner.x + INDENT, &sections[..1], theme);
+    help_column(
+        buf,
+        inner,
+        inner.x + INDENT,
+        &sections[..LEFT_SECTIONS],
+        theme,
+    );
     help_column(
         buf,
         inner,
         inner.x + HELP_SECOND_COLUMN,
-        &sections[1..],
+        &sections[LEFT_SECTIONS..],
         theme,
     );
     put(

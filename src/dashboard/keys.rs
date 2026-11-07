@@ -45,10 +45,15 @@ pub const ENTER: &str = "enter";
 pub const ESC: &str = "esc";
 pub const SPACE_NAME: &str = "space";
 
-/// Keys as hints and the help show them, a space between
+/// Keys as hints and the help show them, a space between, like `g G` for top and bottom
 pub fn names(keys: &[char]) -> String {
     keys.iter()
         .map(char::to_string)
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Keys that do the same, as hints and the help show them: `l, enter`
+pub fn either(alternatives: &[&str]) -> String {
+    alternatives.join(", ")
 }
