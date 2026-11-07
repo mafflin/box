@@ -2,6 +2,7 @@
 
 mod app;
 mod collector;
+mod keys;
 #[cfg(test)]
 mod sample;
 mod ui;
@@ -156,7 +157,12 @@ fn docker_error(stderr: &[u8]) -> Option<String> {
         .lines()
         .map(str::trim)
         .find(|line| !line.is_empty())
-        .map(|line| format::sanitize(line.as_bytes(), MAX_ERROR_BYTES))
+        .map(|line| {
+            format::sanitize(
+                docker::without_daemon_prefix(line).as_bytes(),
+                MAX_ERROR_BYTES,
+            )
+        })
 }
 
 /// The input thread, which can stop reading the keyboard while a shell has it

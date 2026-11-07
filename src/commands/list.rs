@@ -4,7 +4,9 @@ use std::collections::HashMap;
 
 use super::{CONTAINER_IMAGE_FORMAT, all_containers};
 use crate::Result;
-use crate::docker::{self, Docker, JSON_FORMAT, reference};
+use crate::docker::{
+    self, Docker, INSPECT_VOLUMES, JSON_FORMAT, LIST_VOLUMES, VOLUME_MOUNT, reference,
+};
 use crate::format::{self, short_id};
 use crate::table::{self, Cell, Column, cell, lines};
 use crate::theme::Theme;
@@ -53,8 +55,8 @@ const IMAGE_FIELDS: [&str; 5] = [
     "{{.CreatedSince}}",
 ];
 
-const CONTAINER_VOLUMES_FORMAT: &str =
-    r#"{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}} {{end}}{{end}}"#;
+/// Each container's mounts as `type:name`, a space after each; a bind mount has no name
+const CONTAINER_MOUNTS_FORMAT: &str = "{{range .Mounts}}{{.Type}}:{{.Name}} {{end}}";
 
 const VOLUME_FIELDS: [&str; 3] = ["{{.Name}}", "{{.Driver}}", "{{.CreatedAt}}"];
 
@@ -122,20 +124,21 @@ pub fn images(docker: &impl Docker, theme: &Theme) -> Result<String> {
 
 /// Volumes and how many containers use them
 pub fn volumes(docker: &impl Docker, theme: &Theme) -> Result<String> {
-    let names = docker.lines(&["volume", "ls", "-q"])?;
+    let names = docker.lines(&LIST_VOLUMES)?;
     if names.is_empty() {
         return Ok(String::new());
     }
 
-    let volume_lists = all_containers(docker, CONTAINER_VOLUMES_FORMAT)?;
+    let mount_lists = all_containers(docker, CONTAINER_MOUNTS_FORMAT)?;
     let containers_by_volume = tally(
-        volume_lists
+        mount_lists
             .iter()
-            .flat_map(|volumes| volumes.split_whitespace())
+            .flat_map(|mounts| mounts.split_whitespace())
+            .filter_map(|mount| mount.strip_prefix(VOLUME_MOUNT)?.strip_prefix(':'))
             .map(String::from),
     );
     let names: Vec<&str> = names.iter().map(String::as_str).collect();
-    let rows: Vec<Vec<Cell>> = records(docker, &["volume", "inspect"], &VOLUME_FIELDS, &names)?
+    let rows: Vec<Vec<Cell>> = records(docker, &INSPECT_VOLUMES, &VOLUME_FIELDS, &names)?
         .into_iter()
         .map(|fields| {
             let [name, driver, created_at] = &fields[..] else {

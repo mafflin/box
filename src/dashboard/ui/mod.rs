@@ -16,6 +16,9 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use super::app::{App, Details};
+use crate::cli::PROGRAM;
+use crate::dashboard::app::Sort;
+use crate::format::ELLIPSIS;
 use crate::theme::Theme;
 
 const MIN_WIDTH: u16 = 30;
@@ -34,6 +37,9 @@ const MIN_RIGHT_DETAILS_WIDTH: u16 = 36;
 const MAX_RIGHT_DETAILS_WIDTH: u16 = 64;
 /// Before the first thing on the tabs line and the footer, and after the last
 const BAR_MARGIN: u16 = 1;
+/// The way a sort goes, after the sorted column's title and in the tabs line
+const ASCENDING: &str = "▲";
+const DESCENDING: &str = "▼";
 /// Shown for what has no value
 const NO_VALUE: &str = "—";
 
@@ -47,7 +53,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             buf,
             area.x,
             area.y,
-            "box needs a bigger terminal",
+            &format!("{PROGRAM} needs a bigger terminal"),
             fg(theme.muted),
             area.right(),
         );
@@ -108,6 +114,14 @@ fn draw_body(buf: &mut Buffer, area: Rect, app: &mut App) {
             );
         }
         _ => table::draw(buf, area, app),
+    }
+}
+
+fn sort_arrow(sort: Sort) -> &'static str {
+    if sort.descending {
+        DESCENDING
+    } else {
+        ASCENDING
     }
 }
 
@@ -243,7 +257,7 @@ fn fit(text: &str, columns: usize, right_aligned: bool) -> String {
         return String::new();
     } else {
         let (head, used) = head(text, columns - 1);
-        (format!("{head}…"), used + 1)
+        (format!("{head}{ELLIPSIS}"), used + 1)
     };
     let padding = " ".repeat(columns - shown_width);
     if right_aligned {

@@ -12,6 +12,33 @@ use crate::format::{self, parse_size, parse_size_pair};
 pub const UNTAGGED: &str = "<none>";
 /// For `--format`: an object per line, as the parsers here read
 pub const JSON_FORMAT: &str = "{{json .}}";
+/// A mount's `Type` when it's a named or anonymous volume
+pub const VOLUME_MOUNT: &str = "volume";
+/// In a running container's status, like `Up 2 hours (unhealthy)`, when its health check fails
+const UNHEALTHY: &str = "unhealthy";
+/// What runs when an image sets no user or working directory
+const DEFAULT_USER: &str = "root";
+const DEFAULT_WORKDIR: &str = "/";
+/// The start of the event actions of commands run in a container, like `exec_start`, health checks' too
+const EXEC_EVENT: &str = "exec_";
+/// The labels an image's source, version and revision come from, like `org.opencontainers.image.source`
+const OCI_LABELS: &str = "org.opencontainers.image.";
+/// How `docker image ls` gives a creation time, before the zone's name: `2026-10-12 10:00:00 +0200 CEST`
+const IMAGE_CREATED_FORMAT: &str = "%Y-%m-%d %H:%M:%S %z";
+/// A 64-bit x86 host runs 32-bit x86 images natively
+const AMD64: &str = "linux/amd64";
+const X86: &str = "linux/386";
+
+/// Docker's container states, as `docker inspect` gives them
+pub mod state {
+    pub const CREATED: &str = "created";
+    pub const RUNNING: &str = "running";
+    pub const PAUSED: &str = "paused";
+    pub const RESTARTING: &str = "restarting";
+    pub const REMOVING: &str = "removing";
+    pub const EXITED: &str = "exited";
+    pub const DEAD: &str = "dead";
+}
 /// The most of a label or command that's kept
 const MAX_TEXT: usize = 1000;
 
@@ -56,12 +83,20 @@ pub struct Container {
 impl Container {
     /// Running, not paused or restarting: what a shell can open in
     pub fn is_running(&self) -> bool {
-        self.state == "running"
+        self.state == state::RUNNING
     }
 
     /// Running, paused or restarting: what stop stops
     pub fn is_up(&self) -> bool {
-        matches!(self.state.as_str(), "running" | "paused" | "restarting")
+        matches!(
+            self.state.as_str(),
+            state::RUNNING | state::PAUSED | state::RESTARTING
+        )
+    }
+
+    /// Running, but failing its health check
+    pub fn is_unhealthy(&self) -> bool {
+        self.state == state::RUNNING && self.status.contains(UNHEALTHY)
     }
 
     /// Started with `-t` or `-i`: its output is a terminal session, not logs
@@ -89,12 +124,16 @@ impl Container {
 
 /// Root when the image doesn't set a user
 fn shown_user(user: &str) -> &str {
-    if user.is_empty() { "root" } else { user }
+    if user.is_empty() { DEFAULT_USER } else { user }
 }
 
 /// `/` when the image doesn't set a working directory
 fn shown_workdir(workdir: &str) -> &str {
-    if workdir.is_empty() { "/" } else { workdir }
+    if workdir.is_empty() {
+        DEFAULT_WORKDIR
+    } else {
+        workdir
+    }
 }
 
 /// `repository:tag`, or `<none>` for an untagged image
@@ -171,7 +210,7 @@ impl Image {
         if host.is_empty() || self.platform.is_empty() {
             return false;
         }
-        let native = built_for(host) || (host == "linux/amd64" && built_for("linux/386"));
+        let native = built_for(host) || (host == AMD64 && built_for(X86));
         !native
     }
 
@@ -535,7 +574,7 @@ fn oci_label(config: &ImageConfig, name: &str) -> String {
     config
         .labels
         .as_ref()
-        .and_then(|labels| labels.get(&format!("org.opencontainers.image.{name}")))
+        .and_then(|labels| labels.get(&format!("{OCI_LABELS}{name}")))
         .map_or_else(String::new, |value| plain(value))
 }
 
@@ -563,8 +602,9 @@ fn plain(text: &str) -> String {
 
 /// Like `2026-10-12 10:00:00 +0200 CEST`
 fn image_created_at(created_at: &str) -> i64 {
-    let time: Vec<&str> = created_at.split_whitespace().take(3).collect();
-    jiff::fmt::strtime::parse("%Y-%m-%d %H:%M:%S %z", time.join(" "))
+    let parts = IMAGE_CREATED_FORMAT.split_whitespace().count();
+    let time: Vec<&str> = created_at.split_whitespace().take(parts).collect();
+    jiff::fmt::strtime::parse(IMAGE_CREATED_FORMAT, time.join(" "))
         .and_then(|time| time.to_timestamp())
         .map_or(0, jiff::Timestamp::as_second)
 }
@@ -605,7 +645,8 @@ pub fn stats(line: &str) -> Option<Stats> {
 /// A `docker events --format '{{json .}}'` line that can change what the dashboard shows; exec events, like
 /// health checks', don't
 pub fn is_change(event: &str) -> bool {
-    serde_json::from_str::<EventLine>(event).is_ok_and(|event| !event.action.starts_with("exec_"))
+    serde_json::from_str::<EventLine>(event)
+        .is_ok_and(|event| !event.action.starts_with(EXEC_EVENT))
 }
 
 #[cfg(test)]

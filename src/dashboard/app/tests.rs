@@ -137,7 +137,7 @@ fn opens_a_shell_in_running_containers() {
     let missing = r#"OCI runtime exec failed: exec: "sh": executable file not found in $PATH"#;
     assert_eq!(app.update(failed(missing), Instant::now()), []);
     assert_eq!(app.toast.as_ref().unwrap().text, "no shell in api");
-    let stopped = "Error response from daemon: container api-id is not running";
+    let stopped = "container api-id is not running";
     app.update(failed(stopped), Instant::now());
     assert_eq!(
         app.toast.as_ref().unwrap().text,
@@ -353,6 +353,10 @@ fn log_lines() {
         ("", "no timestamp level=warn", Level::Warning)
     );
     assert_eq!(LogLine::parse(b"0 errors").level, Level::Info);
+    // In capitals or lowercase, every level word; mixed case is prose
+    assert_eq!(LogLine::parse(b"critical: disk full").level, Level::Error);
+    assert_eq!(LogLine::parse(b"[trace] tick").level, Level::Debug);
+    assert_eq!(LogLine::parse(b"Error handling is on").level, Level::Info);
 }
 
 #[test]

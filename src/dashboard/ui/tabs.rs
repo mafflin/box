@@ -4,8 +4,9 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
 
-use super::{BAR_MARGIN, badge, bold, fg, put, put_right};
+use super::{BAR_MARGIN, badge, bold, fg, put, put_right, sort_arrow};
 use crate::dashboard::app::{App, View};
+use crate::format::ELLIPSIS;
 
 /// Between two tabs
 const TAB_GAP: u16 = 1;
@@ -45,7 +46,7 @@ fn status_groups(app: &App) -> Vec<Group> {
     let theme = app.theme;
     let sort = app.sort[app.view.index()];
     let filter = &app.filter[app.view.index()];
-    let arrow = if sort.descending { "▼" } else { "▲" };
+    let arrow = sort_arrow(sort);
     let mut groups = Vec::new();
     if app.disconnected.is_some() {
         groups.push(Group {
@@ -61,12 +62,17 @@ fn status_groups(app: &App) -> Vec<Group> {
         ],
     });
     if !filter.is_empty() || app.filtering {
-        let shown = if filter.is_empty() { "…" } else { filter };
+        // Until something's typed
+        let shown = if filter.is_empty() {
+            ELLIPSIS.to_string()
+        } else {
+            filter.clone()
+        };
         groups.push(Group {
             keep: 2,
             spans: vec![
                 Span::styled("filter ", fg(theme.dim)),
-                Span::styled(shown.to_string(), bold(theme.accent)),
+                Span::styled(shown, bold(theme.accent)),
             ],
         });
     }

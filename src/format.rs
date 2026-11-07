@@ -29,6 +29,8 @@ const SCRIPT_FLAG: &str = "-c";
 const PLAIN: &str = "-_./:=@%+,";
 /// A `'` inside single quotes: end them, an escaped `'`, start them again
 const QUOTE_IN_QUOTES: &str = r"'\''";
+/// Where text is cut, or more of it follows
+pub const ELLIPSIS: char = '…';
 /// Bytes in a kilobyte, as docker counts image sizes and traffic
 const KB: u64 = 1000;
 /// Bytes in a kibibyte, as top and docker stats count memory
@@ -110,7 +112,7 @@ pub fn shorten_middle(text: &str, width: usize) -> String {
     let kept = width.saturating_sub(1);
     let head: String = text.chars().take(kept - kept / 2).collect();
     let tail: String = text.chars().skip(length - kept / 2).collect();
-    format!("{head}…{tail}")
+    format!("{head}{ELLIPSIS}{tail}")
 }
 
 /// Docker names anonymous volumes with 64 hex digits
@@ -302,7 +304,7 @@ pub fn parse_size_pair(pair: &str) -> Option<(u64, u64)> {
 }
 
 /// Escape, which starts every 7-bit escape sequence
-const ESC: char = '\u{1b}';
+pub const ESC: char = '\u{1b}';
 /// Control Sequence Introducer, the 8-bit form of `ESC [`
 const CSI: char = '\u{9b}';
 /// Bell, which xterm also accepts as a String Terminator

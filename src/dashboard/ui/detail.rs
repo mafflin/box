@@ -10,8 +10,9 @@ use ratatui::text::{Line, Span};
 use super::table::{fraction, state_color};
 use super::{NO_VALUE, bold, fg, fill, head, padded, put, put_line, rounded_box, size};
 use crate::dashboard::app::{App, History, View};
+use crate::dashboard::keys::{self, names};
 use crate::docker::{Container, Image, Stats, Volume};
-use crate::format::{self, compact_bytes};
+use crate::format::{self, ELLIPSIS, compact_bytes};
 use crate::theme::Theme;
 
 /// The labels' column, like `workdir  `
@@ -243,7 +244,7 @@ impl Lines {
         self.lines.push(Line::default());
         self.lines.push(Line::from(vec![
             Span::styled("dangling · removed by ", fg(theme.dim)),
-            Span::styled("p", bold(theme.accent)),
+            Span::styled(names(&[keys::PRUNE]), bold(theme.accent)),
             Span::styled(" prune", fg(theme.dim)),
         ]));
     }
@@ -397,7 +398,7 @@ fn draw_lines(buf: &mut Buffer, area: Rect, lines: &[Line], theme: &Theme) {
     }
     if shown < lines.len() && height > 0 {
         let y = area.y + size(shown);
-        let more = format!("… {} more", lines.len() - shown);
+        let more = format!("{ELLIPSIS} {} more", lines.len() - shown);
         put(buf, area.x, y, &more, fg(theme.dim), area.right());
     }
 }
@@ -424,7 +425,7 @@ fn cut<'a>(line: &Line<'a>, width: usize) -> Line<'a> {
             break;
         }
     }
-    spans.push(Span::styled("…", style));
+    spans.push(Span::styled(ELLIPSIS.to_string(), style));
     Line::from(spans)
 }
 

@@ -3,7 +3,7 @@ use super::*;
 fn keys(groups: &[Vec<Hint>]) -> Vec<Vec<&str>> {
     groups
         .iter()
-        .map(|group| group.iter().map(|hint| hint.key).collect())
+        .map(|group| group.iter().map(|hint| hint.key.as_str()).collect())
         .collect()
 }
 

@@ -8,6 +8,18 @@ use anyhow::{anyhow, bail};
 use crate::Result;
 
 pub const DOCKER: &str = "docker";
+/// Before most of docker's errors, which box leaves out
+const DAEMON_ERROR: &str = "Error response from daemon: ";
+
+/// Removes a container with its anonymous volumes, as `box prune` and the dashboard do
+pub const REMOVE_CONTAINER: [&str; 2] = ["rm", "-v"];
+/// What lets `REMOVE_CONTAINER` remove a running one
+pub const FORCE: &str = "-f";
+pub const REMOVE_VOLUME: [&str; 2] = ["volume", "rm"];
+pub const REMOVE_IMAGE: [&str; 1] = ["rmi"];
+/// Every volume's name
+pub const LIST_VOLUMES: [&str; 3] = ["volume", "ls", "-q"];
+pub const INSPECT_VOLUMES: [&str; 2] = ["volume", "inspect"];
 
 /// Runs docker, which `box list`, `prune` and `stop` share with the dashboard
 pub trait Docker {
@@ -84,6 +96,11 @@ pub fn args(args: &[&str]) -> Vec<String> {
     args.iter().map(ToString::to_string).collect()
 }
 
+/// A docker error without the `Error response from daemon: ` most start with
+pub fn without_daemon_prefix(line: &str) -> &str {
+    line.strip_prefix(DAEMON_ERROR).unwrap_or(line)
+}
+
 /// Why docker couldn't start, like when it isn't installed
 pub fn cant_run(error: &std::io::Error) -> String {
     format!("can't run docker: {error}")
@@ -92,10 +109,10 @@ pub fn cant_run(error: &std::io::Error) -> String {
 /// Docker is installed and its daemon running
 pub fn check() -> Result<()> {
     if !succeeds(&["--version"]) {
-        bail!("docker is not installed");
+        bail!("{DOCKER} is not installed");
     }
     if !succeeds(&["info"]) {
-        bail!("docker is not running");
+        bail!("{DOCKER} is not running");
     }
     Ok(())
 }
@@ -130,17 +147,13 @@ fn captured(args: &[&str]) -> Result<Output> {
 fn error_message(args: &[&str], output: &Output) -> anyhow::Error {
     let stderr = String::from_utf8_lossy(&output.stderr);
     match stderr.lines().map(str::trim).find(|line| !line.is_empty()) {
-        Some(line) => anyhow!(
-            "{}",
-            line.strip_prefix("Error response from daemon: ")
-                .unwrap_or(line)
-        ),
+        Some(line) => anyhow!("{}", without_daemon_prefix(line)),
         None => failed(args),
     }
 }
 
 fn failed(args: &[&str]) -> anyhow::Error {
-    anyhow!("docker {} failed", args.join(" "))
+    anyhow!("{DOCKER} {} failed", args.join(" "))
 }
 
 fn lines(output: &Output) -> Vec<String> {
@@ -156,7 +169,7 @@ pub mod fake {
 
     use std::cell::RefCell;
 
-    use super::Docker;
+    use super::{DOCKER, Docker};
     use crate::Result;
 
     #[derive(Default)]
@@ -191,7 +204,7 @@ pub mod fake {
                 })
                 .max_by_key(|(prefix, _)| prefix.len());
             match response {
-                Some((_, None)) => anyhow::bail!("docker {} failed", args.join(" ")),
+                Some((_, None)) => anyhow::bail!("{DOCKER} {} failed", args.join(" ")),
                 Some((_, Some(lines))) => Ok(lines.clone()),
                 None => Ok(Vec::new()),
             }

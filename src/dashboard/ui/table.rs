@@ -4,9 +4,12 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 
-use super::{NO_VALUE, bold, fg, fill, fit, put, put_on_border, rounded_box, size, width};
+use super::{
+    NO_VALUE, bold, fg, fill, fit, put, put_on_border, rounded_box, size, sort_arrow, width,
+};
 use crate::dashboard::app::{App, Pending, Sort, SortKey, View};
-use crate::docker::{Container, Image, Stats};
+use crate::dashboard::keys;
+use crate::docker::{Container, Image, Stats, state};
 use crate::format::{compact_bytes, short_id};
 use crate::theme::Theme;
 
@@ -134,12 +137,16 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
 
 /// The columns' titles, an arrow on the sorted one
 fn headers(columns: &[Column], sort: Sort) -> Vec<String> {
-    let arrow = if sort.descending { " ▼" } else { " ▲" };
+    let arrow = format!(" {}", sort_arrow(sort));
     columns
         .iter()
         .map(|column| {
             let sorted = column.sort == Some(sort.key);
-            format!("{}{}", column.title, if sorted { arrow } else { "" })
+            format!(
+                "{}{}",
+                column.title,
+                if sorted { arrow.as_str() } else { "" }
+            )
         })
         .collect()
 }
@@ -260,7 +267,10 @@ fn empty_message(app: &App) -> String {
     } else if !filter.is_empty() {
         format!("nothing matches “{filter}”")
     } else if app.view == View::Containers && !app.show_all && !app.containers.is_empty() {
-        "no running containers · press a to show all".to_string()
+        format!(
+            "no running containers · press {} to show all",
+            keys::SHOW_ALL
+        )
     } else {
         format!("no {}", app.view.title().to_lowercase())
     }
@@ -345,12 +355,12 @@ fn status_cell(app: &App, container: &Container) -> Cell {
 
 pub fn state_color(theme: &Theme, container: &Container) -> Color {
     match container.state.as_str() {
-        "running" if container.status.contains("unhealthy") => theme.yellow,
-        "running" => theme.green,
-        "paused" | "restarting" => theme.yellow,
-        "exited" if container.exit_code == 0 => theme.dim,
-        "created" => theme.muted,
-        "exited" | "dead" | "removing" => theme.red,
+        state::RUNNING if container.is_unhealthy() => theme.yellow,
+        state::RUNNING => theme.green,
+        state::PAUSED | state::RESTARTING => theme.yellow,
+        state::EXITED if container.exit_code == 0 => theme.dim,
+        state::CREATED => theme.muted,
+        state::EXITED | state::DEAD | state::REMOVING => theme.red,
         _ => theme.text,
     }
 }

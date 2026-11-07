@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use super::app::{Action, LogLine, Snapshot, Task};
 use crate::commands::prune;
 use crate::docker::streams::{self, Children};
-use crate::docker::{self, Captured, Docker, JSON_FORMAT};
+use crate::docker::{self, Captured, Docker, INSPECT_VOLUMES, JSON_FORMAT, LIST_VOLUMES};
 
 /// How often to look again when nothing happened
 const REFRESH: Duration = Duration::from_secs(5);
@@ -20,6 +20,8 @@ const SETTLE: Duration = Duration::from_millis(150);
 const MIN_INTERVAL: Duration = Duration::from_secs(1);
 /// The lines of logs shown when they open, before new ones follow
 const LOG_TAIL: &str = "500";
+/// The daemon's OS and CPU, like `linux/arm64`
+const PLATFORM_FORMAT: &str = "{{.Server.Os}}/{{.Server.Arch}}";
 
 pub struct Collector {
     actions: Sender<Action>,
@@ -171,7 +173,7 @@ fn refresher(requests: &Receiver<()>, snapshots: &Sender<Action>) {
 /// Docker's OS and CPU, like `linux/arm64`, which don't change while it runs
 fn host_platform() -> Option<String> {
     let lines = Captured
-        .lines(&["version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"])
+        .lines(&["version", "--format", PLATFORM_FORMAT])
         .ok()?;
     let platform = lines.first()?.trim();
     let known = platform
@@ -189,8 +191,8 @@ fn snapshot(host: &str) -> Result<Snapshot, String> {
         // Only details, the images show without them
         let image_inspect = docker::inspect_all(&["image", "inspect"], &docker::image_ids(&images))
             .unwrap_or_default();
-        let names = Captured.lines(&["volume", "ls", "-q"])?;
-        let volumes = docker::inspect_all(&["volume", "inspect"], &names)?;
+        let names = Captured.lines(&LIST_VOLUMES)?;
+        let volumes = docker::inspect_all(&INSPECT_VOLUMES, &names)?;
         Ok(Snapshot {
             containers: docker::containers(&ps, &inspect)?,
             images: docker::images(&images, &image_inspect)?,

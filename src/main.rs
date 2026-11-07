@@ -53,7 +53,7 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             // `:#` adds the causes
-            eprintln!("box: {e:#}");
+            eprintln!("{}: {e:#}", cli::PROGRAM);
             ExitCode::FAILURE
         }
     }

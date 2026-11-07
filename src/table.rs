@@ -2,13 +2,18 @@
 
 use ratatui::style::Color;
 
-use crate::format::Highlighted;
+use crate::format::{ESC, Highlighted};
 use crate::theme::Theme;
 
 /// The SGR parameter for bold, the titles' style
 const BOLD: &str = "1";
 /// Between two columns
 const COLUMN_GAP: &str = "  ";
+/// The SGR parameter that ends a style
+const RESET: &str = "0";
+/// The SGR parameters before a text color's number of the 256, or its red, green and blue
+const INDEXED_COLOR: &str = "38;5";
+const RGB_COLOR: &str = "38;2";
 
 /// Its color is the theme's for its field
 pub struct Column {
@@ -154,8 +159,8 @@ fn sgr(color: Color) -> Option<String> {
         Color::LightMagenta => 95,
         Color::LightCyan => 96,
         Color::White => 97,
-        Color::Indexed(index) => return Some(format!("38;5;{index}")),
-        Color::Rgb(red, green, blue) => return Some(format!("38;2;{red};{green};{blue}")),
+        Color::Indexed(index) => return Some(format!("{INDEXED_COLOR};{index}")),
+        Color::Rgb(red, green, blue) => return Some(format!("{RGB_COLOR};{red};{green};{blue}")),
     };
     Some(code.to_string())
 }
@@ -163,7 +168,7 @@ fn sgr(color: Color) -> Option<String> {
 fn paint(text: &str, code: Option<&str>) -> String {
     match code {
         _ if text.is_empty() => String::new(),
-        Some(code) => format!("\u{1b}[{code}m{text}\u{1b}[0m"),
+        Some(code) => format!("{ESC}[{code}m{text}{ESC}[{RESET}m"),
         None => text.to_string(),
     }
 }

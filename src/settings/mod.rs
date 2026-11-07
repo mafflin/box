@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use serde::Deserialize;
 
+use crate::cli::PROGRAM;
 use crate::theme::Theme;
 use crate::{Result, paths};
 
@@ -13,7 +14,7 @@ const EXAMPLE: &str = include_str!("example.toml");
 
 pub fn path() -> PathBuf {
     paths::xdg_dir("XDG_CONFIG_HOME", ".config")
-        .join("box")
+        .join(PROGRAM)
         .join("settings.toml")
 }
 

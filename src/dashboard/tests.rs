@@ -86,9 +86,10 @@ fn stops_reading_while_paused() {
 fn docker_errors() {
     let error =
         b"\nError response from daemon: container abc is not running\nSee 'docker exec --help'.\n";
+    // Without the prefix, as box shows docker's other errors
     assert_eq!(
         docker_error(error).as_deref(),
-        Some("Error response from daemon: container abc is not running")
+        Some("container abc is not running")
     );
     assert_eq!(
         docker_error(b"\x1b]0;title\x07oops\n").as_deref(),

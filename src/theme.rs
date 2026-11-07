@@ -138,6 +138,9 @@ impl Theme {
     }
 }
 
+/// The color name for the terminal's own text color
+const DEFAULT_COLOR: &str = "default";
+
 /// `"default"` for the terminal's text color, an ANSI name like `cyan` or `bright-red`, a number of the 256,
 /// or `#rrggbb`
 fn color<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Color, D::Error> {
@@ -147,10 +150,11 @@ fn color<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Color, D::Error> 
         Number(u8),
         Name(String),
     }
-    let expected = r##"a color like "default", "cyan", "bright-red", 239 or "#ff8800""##;
-    match Value::deserialize(deserializer).map_err(|_| serde::de::Error::custom(expected))? {
+    let expected =
+        format!(r##"a color like "{DEFAULT_COLOR}", "cyan", "bright-red", 239 or "#ff8800""##);
+    match Value::deserialize(deserializer).map_err(|_| serde::de::Error::custom(&expected))? {
         Value::Number(index) => Ok(Color::Indexed(index)),
-        Value::Name(name) if name.eq_ignore_ascii_case("default") => Ok(Color::Reset),
+        Value::Name(name) if name.eq_ignore_ascii_case(DEFAULT_COLOR) => Ok(Color::Reset),
         Value::Name(name) => name.parse().map_err(|_| {
             serde::de::Error::custom(format!("unknown color {name}, expected {expected}"))
         }),

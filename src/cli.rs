@@ -5,6 +5,9 @@ use std::fmt::Write;
 
 use crate::commands::{ListTarget, PruneTarget};
 
+/// How box calls itself in errors
+pub const PROGRAM: &str = "box";
+
 const BOX_HELP: &str = "\
 Usage: box [command] [options]
 
@@ -98,10 +101,14 @@ impl UsageError {
 
     /// `box: ...` and where to find the usage
     pub fn report(&self) -> String {
-        let help = self
-            .command
-            .map_or_else(|| "box".to_string(), |command| format!("box {command}"));
-        format!("box: {}\nTry '{help} --help' for usage.", self.message)
+        let help = self.command.map_or_else(
+            || PROGRAM.to_string(),
+            |command| format!("{PROGRAM} {command}"),
+        );
+        format!(
+            "{PROGRAM}: {}\nTry '{help} --help' for usage.",
+            self.message
+        )
     }
 }
 

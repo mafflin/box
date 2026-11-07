@@ -15,6 +15,10 @@ use crate::{Result, print};
 
 /// Each container's image ID
 const CONTAINER_IMAGE_FORMAT: &str = "{{.Image}}";
+/// The targets `box list` and `box prune` share
+const CONTAINERS: &str = "containers";
+const IMAGES: &str = "images";
+const VOLUMES: &str = "volumes";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ListTarget {
@@ -26,9 +30,9 @@ pub enum ListTarget {
 impl ListTarget {
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
-            "containers" => Some(Self::Containers),
-            "images" => Some(Self::Images),
-            "volumes" => Some(Self::Volumes),
+            CONTAINERS => Some(Self::Containers),
+            IMAGES => Some(Self::Images),
+            VOLUMES => Some(Self::Volumes),
             _ => None,
         }
     }

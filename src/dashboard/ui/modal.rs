@@ -8,6 +8,7 @@ use ratatui::text::{Line, Span};
 use super::{badge, bold, fg, fill, fit, padded, put, put_line, rounded_box, size, width};
 use crate::commands::PruneTarget;
 use crate::dashboard::app::{App, Confirm, Modal, PruneDialog};
+use crate::dashboard::keys::{self, names};
 use crate::format::human_size;
 use crate::theme::Theme;
 
@@ -32,38 +33,51 @@ const PRUNE_LABEL_WIDTH: usize = 20;
 const PRUNE_COUNT_WIDTH: usize = 4;
 
 /// A title and its keys with what they do
-type Section = (&'static str, &'static [(&'static str, &'static str)]);
+type Section = (&'static str, Vec<(String, &'static str)>);
 
-const HELP: [Section; 3] = [
-    (
-        "General",
-        &[
-            ("↑↓ j k", "move"),
-            ("g G", "top / bottom"),
-            ("tab 1 2 3", "switch view"),
-            ("/", "filter"),
-            ("esc", "clear filter"),
-            ("P M N", "sort cpu / mem / name"),
-            ("S", "sort size"),
-            ("T", "sort started / created"),
-            ("i", "details bottom/right/off"),
-            ("p", "prune"),
-            ("q", "quit"),
-        ],
-    ),
-    (
-        "Containers",
-        &[
-            ("s", "stop / start"),
-            ("r", "restart"),
-            ("d", "remove"),
-            ("l enter", "logs (not for -it)"),
-            ("e", "shell (bash or sh)"),
-            ("a", "show stopped"),
-        ],
-    ),
-    ("Images · Volumes", &[("d", "remove if unused")]),
-];
+/// What the help shows, its keys from `keys`
+fn help_sections() -> [Section; 3] {
+    let key = |key: char| names(&[key]);
+    let general = vec![
+        (
+            format!("{} {}", keys::ARROWS, names(&[keys::DOWN, keys::UP])),
+            "move",
+        ),
+        (names(&[keys::TOP, keys::BOTTOM]), "top / bottom"),
+        (
+            format!("{} {}", keys::TAB, names(&keys::VIEW_KEYS)),
+            "switch view",
+        ),
+        (key(keys::FILTER), "filter"),
+        (keys::ESC.to_string(), "clear filter"),
+        (
+            names(&[keys::SORT_CPU, keys::SORT_MEMORY, keys::SORT_NAME]),
+            "sort cpu / mem / name",
+        ),
+        (key(keys::SORT_SIZE), "sort size"),
+        (key(keys::SORT_TIME), "sort started / created"),
+        (key(keys::DETAILS), "details bottom/right/off"),
+        (key(keys::PRUNE), "prune"),
+        (key(keys::QUIT), "quit"),
+    ];
+    let containers = vec![
+        (key(keys::STOP), "stop / start"),
+        (key(keys::RESTART), "restart"),
+        (key(keys::REMOVE), "remove"),
+        (
+            format!("{} {}", key(keys::LOGS), keys::ENTER),
+            "logs (not for -it)",
+        ),
+        (key(keys::SHELL), "shell (bash or sh)"),
+        (key(keys::SHOW_ALL), "show stopped"),
+    ];
+    let images_and_volumes = vec![(key(keys::REMOVE), "remove if unused")];
+    [
+        ("General", general),
+        ("Containers", containers),
+        ("Images · Volumes", images_and_volumes),
+    ]
+}
 
 /// In `PruneTarget::ORDER`
 const PRUNE_LABELS: [&str; PruneTarget::ORDER.len()] =
@@ -89,8 +103,15 @@ fn help(buf: &mut Buffer, area: Rect, theme: &Theme) {
         theme.accent,
         theme.bar,
     );
-    help_column(buf, inner, inner.x + INDENT, &HELP[..1], theme);
-    help_column(buf, inner, inner.x + HELP_SECOND_COLUMN, &HELP[1..], theme);
+    let sections = help_sections();
+    help_column(buf, inner, inner.x + INDENT, &sections[..1], theme);
+    help_column(
+        buf,
+        inner,
+        inner.x + HELP_SECOND_COLUMN,
+        &sections[1..],
+        theme,
+    );
     put(
         buf,
         inner.x + INDENT,
@@ -107,7 +128,7 @@ fn help_column(buf: &mut Buffer, inner: Rect, x: u16, sections: &[Section], them
     for (title, keys) in sections {
         put(buf, x, y, title, bold(theme.accent), inner.right());
         y += 1;
-        for (key, description) in *keys {
+        for (key, description) in keys {
             put(buf, x, y, key, bold(theme.text), inner.right());
             put(
                 buf,
@@ -159,9 +180,12 @@ fn confirmation(buf: &mut Buffer, area: Rect, theme: &Theme, confirm: &Confirm) 
         inner.right(),
     );
     let buttons = Line::from(vec![
-        Span::styled(" y ", badge(color)),
+        Span::styled(format!(" {} ", keys::YES), badge(color)),
         Span::styled(" confirm    ", fg(theme.text)),
-        Span::styled(" n ", bold(theme.text).bg(theme.selected)),
+        Span::styled(
+            format!(" {} ", keys::NO),
+            bold(theme.text).bg(theme.selected),
+        ),
         Span::styled(" cancel", fg(theme.text)),
     ]);
     put_line(buf, x, last_row(inner), &buttons, inner.right());
@@ -202,16 +226,22 @@ fn prune(buf: &mut Buffer, area: Rect, app: &App, state: &PruneDialog) {
         fg(theme.dim),
         inner.right(),
     );
-    let keys = keys_line(
+    let hints = keys_line(
         &[
-            ("↑↓", "move"),
-            ("space", "toggle"),
-            ("enter", "run"),
-            ("esc", "cancel"),
+            (keys::ARROWS, "move"),
+            (keys::SPACE_NAME, "toggle"),
+            (keys::ENTER, "run"),
+            (keys::ESC, "cancel"),
         ],
         theme,
     );
-    put_line(buf, inner.x + INDENT, last_row(inner), &keys, inner.right());
+    put_line(
+        buf,
+        inner.x + INDENT,
+        last_row(inner),
+        &hints,
+        inner.right(),
+    );
 }
 
 /// `› [x] stopped containers     3  1.2GB`: the cursor's marker, whether it's chosen, how many and their size

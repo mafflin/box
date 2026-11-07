@@ -5,8 +5,12 @@ use std::time::{Duration, Instant};
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use super::keys;
 use crate::commands::PruneTarget;
-use crate::docker::{self, Container, Image, Stats, Volume};
+use crate::docker::{
+    self, Container, DOCKER, FORCE, Image, REMOVE_CONTAINER, REMOVE_IMAGE, REMOVE_VOLUME, Stats,
+    VOLUME_MOUNT, Volume,
+};
 use crate::format;
 use crate::theme::Theme;
 
@@ -17,8 +21,19 @@ const MAX_LOG_LINE_BYTES: usize = 4096;
 /// How far back a line from the other output can go
 const LOG_REORDER: usize = 200;
 const TOAST_TIME: Duration = Duration::from_millis(3500);
+/// A log line's local time
+const LOG_TIME_FORMAT: &str = "%H:%M:%S";
+/// Before the level in logs like `level=warn`
+const LEVEL_KEY: &str = "level=";
+/// Words that give a log line its level
+const ERROR_WORDS: [&str; 4] = ["ERROR", "FATAL", "PANIC", "CRITICAL"];
+const WARNING_WORDS: [&str; 2] = ["WARN", "WARNING"];
+const DEBUG_WORDS: [&str; 2] = ["DEBUG", "TRACE"];
+/// Docker's error when an image has no shell for `e`
+const NO_SHELL: &str = "executable file not found";
 /// How many views there are, for what each keeps
 const VIEWS: usize = View::ALL.len();
+const _: () = assert!(keys::VIEW_KEYS.len() == VIEWS, "a key for each view");
 /// How many things prune can remove
 const PRUNE_TARGETS: usize = PruneTarget::ORDER.len();
 /// Rows a page moves until the first draw measures the table and the logs
@@ -50,12 +65,13 @@ impl View {
         }
     }
 
-    fn sort_keys(self) -> &'static [SortKey] {
+    /// In the order the footer shows their keys
+    pub fn sort_keys(self) -> &'static [SortKey] {
         match self {
             Self::Containers => &[
-                SortKey::Name,
                 SortKey::Cpu,
                 SortKey::Memory,
+                SortKey::Name,
                 SortKey::Started,
             ],
             Self::Images => &[SortKey::Name, SortKey::Size, SortKey::Created],
@@ -112,16 +128,26 @@ impl SortKey {
         }
     }
 
-    /// `T` is time: when containers started, when images and volumes were created
+    /// The time key is when containers started, when images and volumes were created
     fn from_key(key: char, view: View) -> Option<Self> {
         match key {
-            'N' => Some(Self::Name),
-            'P' => Some(Self::Cpu),
-            'M' => Some(Self::Memory),
-            'S' => Some(Self::Size),
-            'T' if view == View::Containers => Some(Self::Started),
-            'T' => Some(Self::Created),
+            keys::SORT_NAME => Some(Self::Name),
+            keys::SORT_CPU => Some(Self::Cpu),
+            keys::SORT_MEMORY => Some(Self::Memory),
+            keys::SORT_SIZE => Some(Self::Size),
+            keys::SORT_TIME if view == View::Containers => Some(Self::Started),
+            keys::SORT_TIME => Some(Self::Created),
             _ => None,
+        }
+    }
+
+    pub fn key(self) -> char {
+        match self {
+            Self::Name => keys::SORT_NAME,
+            Self::Cpu => keys::SORT_CPU,
+            Self::Memory => keys::SORT_MEMORY,
+            Self::Size => keys::SORT_SIZE,
+            Self::Created | Self::Started => keys::SORT_TIME,
         }
     }
 }
@@ -192,7 +218,7 @@ impl LogLine {
         };
         let time = at.map_or_else(String::new, |at| {
             at.to_zoned(jiff::tz::TimeZone::system())
-                .strftime("%H:%M:%S")
+                .strftime(LOG_TIME_FORMAT)
                 .to_string()
         });
         let text = format::sanitize(text, MAX_LOG_LINE_BYTES);
@@ -209,17 +235,26 @@ impl LogLine {
 /// From words like `ERROR` or `level=warn`
 fn level(text: &str) -> Level {
     for word in text.split(|c: char| !c.is_ascii_alphanumeric() && c != '=') {
-        let word = word.strip_prefix("level=").unwrap_or(word);
-        match word {
-            "ERROR" | "FATAL" | "PANIC" | "CRITICAL" | "error" | "fatal" | "panic" => {
-                return Level::Error;
-            }
-            "WARN" | "WARNING" | "warn" | "warning" => return Level::Warning,
-            "DEBUG" | "TRACE" | "debug" | "trace" => return Level::Debug,
-            _ => {}
+        let word = word.strip_prefix(LEVEL_KEY).unwrap_or(word);
+        if is_one_of(word, &ERROR_WORDS) {
+            return Level::Error;
+        }
+        if is_one_of(word, &WARNING_WORDS) {
+            return Level::Warning;
+        }
+        if is_one_of(word, &DEBUG_WORDS) {
+            return Level::Debug;
         }
     }
     Level::Info
+}
+
+/// `word` is one of `words`, in capitals or in lowercase, but not mixed, which is more likely prose
+fn is_one_of(word: &str, words: &[&str]) -> bool {
+    let lowercase = !word.bytes().any(|b| b.is_ascii_uppercase());
+    words
+        .iter()
+        .any(|w| word == *w || (lowercase && word.eq_ignore_ascii_case(w)))
 }
 
 pub struct Logs {
@@ -435,7 +470,7 @@ impl App {
 
     /// Says why `e` didn't open a shell, shorter when the image has none
     fn shell_failed(&mut self, name: &str, message: &str) {
-        let message = if message.contains("executable file not found") {
+        let message = if message.contains(NO_SHELL) {
             format!("no shell in {name}")
         } else {
             format!("can't open a shell in {name}: {message}")
@@ -664,7 +699,7 @@ impl App {
             .iter()
             .filter(|container| {
                 container.mounts.iter().any(|mount| {
-                    mount.kind == "volume" && mount.name.as_deref() == Some(&volume.name)
+                    mount.kind == VOLUME_MOUNT && mount.name.as_deref() == Some(&volume.name)
                 })
             })
             .collect()
@@ -796,7 +831,9 @@ impl App {
     // ---------------------------------------------------------------- keys
 
     fn key(&mut self, key: KeyEvent) -> Vec<Effect> {
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && key.code == KeyCode::Char(keys::INTERRUPT)
+        {
             return vec![Effect::Quit];
         }
         if self.modal.is_some() {
@@ -814,33 +851,36 @@ impl App {
 
     fn main_key(&mut self, key: KeyEvent) -> Vec<Effect> {
         match key.code {
-            KeyCode::Down | KeyCode::Char('j') => self.move_selection(Move::By(1)),
-            KeyCode::Up | KeyCode::Char('k') => self.move_selection(Move::By(-1)),
+            KeyCode::Down | KeyCode::Char(keys::DOWN) => self.move_selection(Move::By(1)),
+            KeyCode::Up | KeyCode::Char(keys::UP) => self.move_selection(Move::By(-1)),
             KeyCode::PageDown => self.move_selection(Move::By(page(self.page))),
             KeyCode::PageUp => self.move_selection(Move::By(-page(self.page))),
-            KeyCode::Home | KeyCode::Char('g') => self.move_selection(Move::Top),
-            KeyCode::End | KeyCode::Char('G') => self.move_selection(Move::Bottom),
+            KeyCode::Home | KeyCode::Char(keys::TOP) => self.move_selection(Move::Top),
+            KeyCode::End | KeyCode::Char(keys::BOTTOM) => self.move_selection(Move::Bottom),
             KeyCode::Tab | KeyCode::Right => self.switch_view(1),
             // One back, around the end
             KeyCode::BackTab | KeyCode::Left => self.switch_view(VIEWS - 1),
-            KeyCode::Char(c @ '1'..='3') => self.view = View::ALL[usize::from(c as u8 - b'1')],
-            KeyCode::Char('/') => self.filtering = true,
+            KeyCode::Char(keys::FILTER) => self.filtering = true,
             KeyCode::Esc => self.filter[self.view.index()].clear(),
-            KeyCode::Char('a') if self.view == View::Containers => self.toggle_show_all(),
-            KeyCode::Char('i') => {
+            KeyCode::Char(keys::SHOW_ALL) if self.view == View::Containers => {
+                self.toggle_show_all();
+            }
+            KeyCode::Char(keys::DETAILS) => {
                 self.details = self.details.next();
                 self.toast(format!("details: {}", self.details.label()), Tone::Info);
             }
-            KeyCode::Char('p') => self.open_prune(),
-            KeyCode::Char('?') => self.modal = Some(Modal::Help),
-            KeyCode::Char('q') => return vec![Effect::Quit],
-            KeyCode::Char('s') => return self.start_or_stop(),
-            KeyCode::Char('r') => self.restart(),
-            KeyCode::Char('d') | KeyCode::Delete => self.remove(),
-            KeyCode::Char('l') | KeyCode::Enter => return self.open_logs(),
-            KeyCode::Char('e') => return self.open_shell(),
+            KeyCode::Char(keys::PRUNE) => self.open_prune(),
+            KeyCode::Char(keys::HELP) => self.modal = Some(Modal::Help),
+            KeyCode::Char(keys::QUIT) => return vec![Effect::Quit],
+            KeyCode::Char(keys::STOP) => return self.start_or_stop(),
+            KeyCode::Char(keys::RESTART) => self.restart(),
+            KeyCode::Char(keys::REMOVE) | KeyCode::Delete => self.remove(),
+            KeyCode::Char(keys::LOGS) | KeyCode::Enter => return self.open_logs(),
+            KeyCode::Char(keys::SHELL) => return self.open_shell(),
             KeyCode::Char(c) => {
-                if let Some(key) = SortKey::from_key(c, self.view) {
+                if let Some(view) = keys::VIEW_KEYS.iter().position(|&key| key == c) {
+                    self.view = View::ALL[view];
+                } else if let Some(key) = SortKey::from_key(c, self.view) {
                     self.sort_by(key);
                 }
             }
@@ -961,12 +1001,13 @@ impl App {
             return;
         }
         let name = &container.name;
-        let (title, args): (&str, &[&str]) = if container.is_up() {
-            ("Force remove", &["rm", "-f", "-v"])
+        let mut args = REMOVE_CONTAINER.to_vec();
+        let title = if container.is_up() {
+            args.insert(1, FORCE);
+            "Force remove"
         } else {
-            ("Remove", &["rm", "-v"])
+            "Remove"
         };
-        let mut args = args.to_vec();
         args.push(&container.id);
         self.confirm(
             title,
@@ -986,15 +1027,13 @@ impl App {
             return;
         }
         let target = image.removal_target();
+        let mut args = REMOVE_IMAGE.to_vec();
+        args.push(&target);
         self.confirm(
             "Remove image",
             format!("Remove {} ({})?", image.reference(), image.size),
             true,
-            run(
-                &["rmi", &target],
-                None,
-                format!("removed image {}", image.reference()),
-            ),
+            run(&args, None, format!("removed image {}", image.reference())),
         );
     }
 
@@ -1004,15 +1043,13 @@ impl App {
         if self.in_use(&name, self.volume_users(&volume).len()) {
             return;
         }
+        let mut args = REMOVE_VOLUME.to_vec();
+        args.push(&volume.name);
         self.confirm(
             "Remove volume",
             format!("Remove volume {name}?"),
             true,
-            run(
-                &["volume", "rm", &volume.name],
-                None,
-                format!("removed volume {name}"),
-            ),
+            run(&args, None, format!("removed volume {name}")),
         );
     }
 
@@ -1043,7 +1080,7 @@ impl App {
         self.modal = Some(Modal::Confirm(Confirm {
             title: title.to_string(),
             question,
-            command: format!("docker {}", shown.join(" ")),
+            command: format!("{DOCKER} {}", shown.join(" ")),
             danger,
             task,
         }));
@@ -1118,26 +1155,28 @@ impl App {
             (at < length).then_some(at)
         };
         match key.code {
-            KeyCode::Esc | KeyCode::Char('q' | 'l') => {
+            KeyCode::Esc | KeyCode::Char(keys::QUIT | keys::LOGS) => {
                 let session = logs.session;
                 self.logs = None;
                 return vec![Effect::CloseLogs { session }];
             }
-            KeyCode::Char(' ') => {
+            KeyCode::Char(keys::SPACE) => {
                 logs.view = if logs.view.is_none() {
                     Some(length)
                 } else {
                     None
                 }
             }
-            KeyCode::Up | KeyCode::Char('k') => logs.view = scroll(logs.view, -1).or(Some(top)),
+            KeyCode::Up | KeyCode::Char(keys::UP) => {
+                logs.view = scroll(logs.view, -1).or(Some(top));
+            }
             KeyCode::PageUp => logs.view = scroll(logs.view, -page(rows)).or(Some(top)),
-            KeyCode::Down | KeyCode::Char('j') if logs.view.is_some() => {
+            KeyCode::Down | KeyCode::Char(keys::DOWN) if logs.view.is_some() => {
                 logs.view = scroll(logs.view, 1);
             }
             KeyCode::PageDown if logs.view.is_some() => logs.view = scroll(logs.view, page(rows)),
-            KeyCode::Home | KeyCode::Char('g') => logs.view = Some(top),
-            KeyCode::End | KeyCode::Char('G') => logs.view = None,
+            KeyCode::Home | KeyCode::Char(keys::TOP) => logs.view = Some(top),
+            KeyCode::End | KeyCode::Char(keys::BOTTOM) => logs.view = None,
             _ => {}
         }
         Vec::new()
@@ -1168,8 +1207,11 @@ impl App {
         match modal {
             Modal::Help => {}
             Modal::Confirm(confirm) => match key.code {
-                KeyCode::Char('y' | 'Y') => return self.start(confirm.task),
-                KeyCode::Char('n' | 'N' | 'q') | KeyCode::Esc | KeyCode::Enter => {}
+                KeyCode::Char(c) if c.eq_ignore_ascii_case(&keys::YES) => {
+                    return self.start(confirm.task);
+                }
+                KeyCode::Char(c) if c.eq_ignore_ascii_case(&keys::NO) || c == keys::QUIT => {}
+                KeyCode::Esc | KeyCode::Enter => {}
                 _ => self.modal = Some(Modal::Confirm(confirm)),
             },
             Modal::Prune(dialog) => return self.prune_key(dialog, key),
@@ -1180,14 +1222,16 @@ impl App {
     /// Moves through, toggles, runs or closes the prune dialog; running nothing closes it too
     fn prune_key(&mut self, mut dialog: PruneDialog, key: KeyEvent) -> Vec<Effect> {
         match key.code {
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down | KeyCode::Char(keys::DOWN) => {
                 dialog.cursor = (dialog.cursor + 1) % PRUNE_TARGETS;
             }
             // One back, around the top
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up | KeyCode::Char(keys::UP) => {
                 dialog.cursor = (dialog.cursor + PRUNE_TARGETS - 1) % PRUNE_TARGETS;
             }
-            KeyCode::Char(' ') => dialog.chosen[dialog.cursor] = !dialog.chosen[dialog.cursor],
+            KeyCode::Char(keys::SPACE) => {
+                dialog.chosen[dialog.cursor] = !dialog.chosen[dialog.cursor];
+            }
             KeyCode::Enter => {
                 let targets: Vec<PruneTarget> = PruneTarget::ORDER
                     .into_iter()
@@ -1200,7 +1244,7 @@ impl App {
                 self.toast("pruning…", Tone::Info);
                 return vec![Effect::Start(Task::Prune(targets))];
             }
-            KeyCode::Esc | KeyCode::Char('q' | 'p') => return Vec::new(),
+            KeyCode::Esc | KeyCode::Char(keys::QUIT | keys::PRUNE) => return Vec::new(),
             _ => {}
         }
         self.modal = Some(Modal::Prune(dialog));

@@ -9,6 +9,7 @@ use ratatui::text::Span;
 
 use super::{BAR_MARGIN, bold, fg, fill, put, put_right, size, width};
 use crate::dashboard::app::{App, Logs, Tone, View};
+use crate::dashboard::keys::{self, names};
 use crate::docker::Container;
 use crate::theme::Theme;
 
@@ -26,15 +27,16 @@ const FILTER_GAP: u16 = 3;
 /// A key, what it does, whether it does it for the selection, and how long it stays when the line is too
 /// short: the one with the lowest `keep` goes first, so the higher it is, the longer it stays
 struct Hint {
-    key: &'static str,
+    key: String,
     description: &'static str,
     enabled: bool,
     keep: u8,
 }
 
-const fn hint(key: &'static str, description: &'static str, keep: u8) -> Hint {
+/// `key` as `keys` names it
+fn hint(key: impl Into<String>, description: &'static str, keep: u8) -> Hint {
     Hint {
-        key,
+        key: key.into(),
         description,
         enabled: true,
         keep,
@@ -43,17 +45,22 @@ const fn hint(key: &'static str, description: &'static str, keep: u8) -> Hint {
 
 impl Hint {
     /// Dimmed when it doesn't work for the selection
-    const fn enabled_if(self, enabled: bool) -> Self {
+    fn enabled_if(self, enabled: bool) -> Self {
         Self { enabled, ..self }
     }
 
     fn width(&self) -> usize {
-        width(self.key) + usize::from(KEY_GAP) + width(self.description)
+        width(&self.key) + usize::from(KEY_GAP) + width(self.description)
     }
 }
 
 /// Always on the right, unless a message is
-const PINNED: [Hint; 2] = [hint("?", "help", u8::MAX), hint("q", "quit", u8::MAX)];
+fn pinned_hints() -> [Hint; 2] {
+    [
+        hint(names(&[keys::HELP]), "help", u8::MAX),
+        hint(names(&[keys::QUIT]), "quit", u8::MAX),
+    ]
+}
 
 pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
     let theme = app.theme;
@@ -63,7 +70,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
     let (mut groups, pinned) = hints(app);
     let right = match (&toast, pinned) {
         (Some((text, _)), _) => width(text) + usize::from(BAR_MARGIN),
-        (None, true) => line_width(&[&PINNED[..]]) + usize::from(BAR_MARGIN),
+        (None, true) => line_width(&[&pinned_hints()[..]]) + usize::from(BAR_MARGIN),
         (None, false) => 0,
     };
 
@@ -86,7 +93,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
         );
     } else if pinned {
         let start = area.right().saturating_sub(size(right));
-        draw_hints(buf, start.max(x), area, &[&PINNED[..]], &theme);
+        draw_hints(buf, start.max(x), area, &[&pinned_hints()[..]], &theme);
     }
 }
 
@@ -133,7 +140,7 @@ fn draw_hints(buf: &mut Buffer, mut x: u16, area: Rect, groups: &[&[Hint]], them
             } else {
                 (fg(theme.dim), fg(theme.dim))
             };
-            x = put(buf, x, area.y, hint.key, key_style, area.right());
+            x = put(buf, x, area.y, &hint.key, key_style, area.right());
             x = put(
                 buf,
                 x + KEY_GAP,
@@ -193,19 +200,18 @@ fn hints(app: &mut App) -> (Vec<Vec<Hint>>, bool) {
     }
     match app.view {
         View::Containers => (container_hints(app), true),
-        View::Images => (
-            vec![vec![hint("d", "remove", 9)], list_hints("N S T")],
-            true,
-        ),
-        View::Volumes => (vec![vec![hint("d", "remove", 9)], list_hints("N T")], true),
+        View::Images | View::Volumes => {
+            let remove = hint(names(&[keys::REMOVE]), "remove", 9);
+            (vec![vec![remove], list_hints(app.view)], true)
+        }
     }
 }
 
 fn filter_hints() -> Vec<Hint> {
     vec![
-        hint("enter", "keep", 3),
-        hint("esc", "clear", 2),
-        hint("↑↓", "move", 1),
+        hint(keys::ENTER, "keep", 3),
+        hint(keys::ESC, "clear", 2),
+        hint(keys::ARROWS, "move", 1),
     ]
 }
 
@@ -216,21 +222,22 @@ fn logs_hints(logs: &Logs) -> Vec<Hint> {
         "follow"
     };
     vec![
-        hint("esc", "back", 4),
-        hint("space", pause, 3),
-        hint("↑↓", "scroll", 2),
-        hint("g G", "top / end", 1),
+        hint(keys::ESC, "back", 4),
+        hint(keys::SPACE_NAME, pause, 3),
+        hint(keys::ARROWS, "scroll", 2),
+        hint(names(&[keys::TOP, keys::BOTTOM]), "top / end", 1),
     ]
 }
 
-/// What the list shows and how, `sort` its sort keys
-fn list_hints(sort: &'static str) -> Vec<Hint> {
+/// What the list shows and how, with the view's sort keys
+fn list_hints(view: View) -> Vec<Hint> {
+    let sort: Vec<char> = view.sort_keys().iter().map(|key| key.key()).collect();
     vec![
-        hint("/", "filter", 8),
-        hint("i", "details", 4),
-        hint(sort, "sort", 3),
-        hint("tab", "view", 2),
-        hint("p", "prune", 5),
+        hint(names(&[keys::FILTER]), "filter", 8),
+        hint(names(&[keys::DETAILS]), "details", 4),
+        hint(names(&sort), "sort", 3),
+        hint(keys::TAB, "view", 2),
+        hint(names(&[keys::PRUNE]), "prune", 5),
     ]
 }
 
@@ -246,14 +253,14 @@ fn container_hints(app: &mut App) -> Vec<Vec<Hint>> {
     let logs = !selected.is_some_and(Container::is_interactive);
     let shell = selected.is_some_and(Container::is_running);
     let selection = vec![
-        hint("s", stop, 10),
-        hint("r", "restart", 7),
-        hint("d", "remove", 8),
-        hint("l", "logs", 10).enabled_if(logs),
-        hint("e", "shell", 9).enabled_if(shell),
+        hint(names(&[keys::STOP]), stop, 10),
+        hint(names(&[keys::RESTART]), "restart", 7),
+        hint(names(&[keys::REMOVE]), "remove", 8),
+        hint(names(&[keys::LOGS]), "logs", 10).enabled_if(logs),
+        hint(names(&[keys::SHELL]), "shell", 9).enabled_if(shell),
     ];
-    let mut list = list_hints("P M N T");
-    list.insert(1, hint("a", show, 6));
+    let mut list = list_hints(View::Containers);
+    list.insert(1, hint(names(&[keys::SHOW_ALL]), show, 6));
     vec![selection, list]
 }
 
