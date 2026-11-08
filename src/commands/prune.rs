@@ -1,12 +1,9 @@
 //! `box prune`, which the dashboard's prune dialog shares
 
-use super::{CONTAINER_IMAGE_FORMAT, CONTAINERS, IMAGES, VOLUMES, all_containers};
+use super::{CONTAINER_IMAGE_FORMAT, all_containers};
 use crate::Result;
 use crate::docker::{Docker, REMOVE_CONTAINER, REMOVE_IMAGE, REMOVE_VOLUME, state};
 use crate::format;
-
-/// The target that's every other one
-const ALL: &str = "all";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PruneTarget {
@@ -20,17 +17,6 @@ impl PruneTarget {
     pub const ORDER: [Self; 3] = [Self::Containers, Self::Volumes, Self::Images];
     /// The states of the containers it removes: stopped, or created and never started
     pub const STOPPED_STATES: [&str; 2] = [state::EXITED, state::CREATED];
-
-    /// `all` is every target
-    pub fn from_name(name: &str) -> Option<Vec<Self>> {
-        match name {
-            CONTAINERS => Some(vec![Self::Containers]),
-            VOLUMES => Some(vec![Self::Volumes]),
-            IMAGES => Some(vec![Self::Images]),
-            ALL => Some(Self::ORDER.to_vec()),
-            _ => None,
-        }
-    }
 
     /// What it would remove, as docker lists them
     fn list(self, docker: &impl Docker) -> Result<Vec<String>> {

@@ -8,10 +8,10 @@ options=(
   '--help:Print help'
 )
 
-# The command and targets before the cursor, nothing after --help since it exits
+# The command and targets before the cursor, nothing after --help or --version since they exit
 for word in "${(@)words[2,CURRENT-1]}"; do
   case $word in
-    -h|--help) return 1 ;;
+    -h|--help|-V|--version) return 1 ;;
     -x|--extended) extended=1 ;;
     -*) ;;
     *) given+=("$word") ;;
@@ -24,6 +24,10 @@ case ${given[1]} in
       'list:Print containers, images or volumes as a table'
       'prune:Remove stopped containers, dangling images or unused volumes'
       'stop:Stop all running containers'
+    )
+    options+=(
+      '-V:Print version'
+      '--version:Print version'
     )
     ;;
   list)

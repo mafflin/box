@@ -6,11 +6,11 @@ _box() {
   local word index extended=""
   local -a words=() candidates=() options=(-h --help)
 
-  # The command and targets before the cursor, nothing after --help since it exits
+  # The command and targets before the cursor, nothing after --help or --version since they exit
   for (( index = 1; index < COMP_CWORD; index++ )); do
     word="${COMP_WORDS[index]}"
     case "${word}" in
-      -h|--help) return 0 ;;
+      -h|--help|-V|--version) return 0 ;;
       -x|--extended) extended=1 ;;
       -*) ;;
       *) words+=("${word}") ;;
@@ -20,6 +20,7 @@ _box() {
   case "${words[0]}" in
     "")
       candidates=(list prune stop)
+      options+=(-V --version)
       ;;
     list)
       if (( ${#words[@]} == 1 )); then

@@ -24,7 +24,8 @@ class BoxBashCompletionTest < Minitest::Test
   end
 
   def test_offers_options_for_a_dash
-    assert_equal %w[-h --help], complete('-')
+    assert_equal %w[-h --help -V --version], complete('-')
+    assert_empty complete('--version', '')
     assert_equal %w[-h --help -x --extended], complete('list', 'containers', '-')
     assert_equal %w[-h --help], complete('list', 'images', '-')
     assert_equal %w[containers], complete('list', '-x', '')

@@ -1,81 +1,114 @@
-//! The command line, read the way Ruby's `OptionParser` reads one: options anywhere after the command, long ones
-//! abbreviated, short ones combined, `--` ends them
+//! The command line, parsed with clap: options anywhere after the command, long ones abbreviated, short ones
+//! combined, `--` ends them
 
-use std::fmt::Write;
+use clap::error::ErrorKind;
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 
 use crate::commands::{ListTarget, PruneTarget};
 
 /// How box calls itself in errors
 pub const PROGRAM: &str = "box";
 
-const BOX_HELP: &str = "\
-Usage: box [command] [options]
+/// Usage, then the command's description, then its options
+const HELP_TEMPLATE: &str = "{usage-heading} {usage}\n\n{before-help}{all-args}{after-help}";
 
-Opens a dashboard of containers, images and volumes without a command.
+const LIST: &str = "list";
+const PRUNE: &str = "prune";
 
-Commands:
-  list   Print containers, images or volumes as a table
-  prune  Remove stopped containers, dangling images or unused volumes
-  stop   Stop all running containers
-";
+#[derive(Parser)]
+#[command(
+    name = PROGRAM,
+    version,
+    override_usage = "box [command] [options]",
+    before_help = "Opens a dashboard of containers, images and volumes without a command.",
+    after_help = "Run 'box command --help' for a command's options.",
+    disable_help_subcommand = true
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
 
-const LIST_HELP: &str = "\
-Usage: box list WHAT [options]
-
+#[derive(Subcommand)]
+enum Commands {
+    /// Print containers, images or volumes as a table
+    #[command(
+        override_usage = "box list WHAT [options]",
+        before_help = "\
 Prints WHAT as a table.
 
 Targets:
   containers  Running containers
   images      Images and how many containers use them
-  volumes     Volumes and how many containers use them
-";
+  volumes     Volumes and how many containers use them"
+    )]
+    List(List),
 
-const PRUNE_HELP: &str = "\
-Usage: box prune WHAT...
-
+    /// Remove stopped containers, dangling images or unused volumes
+    #[command(
+        override_usage = "box prune WHAT...",
+        before_help = "\
 Removes WHAT, containers first, then volumes, then images.
 
 Targets:
   containers  Stopped containers
   images      Dangling images
   volumes     Volumes no container uses, named ones too
-  all         All of them
-";
+  all         All of them"
+    )]
+    Prune(Prune),
 
-const STOP_HELP: &str = "\
-Usage: box stop
-
-Stops all running containers, use docker stop for one.
-";
-
-/// Help's column of option names, like `-h, --help`
-const OPTION_NAMES_WIDTH: usize = 15;
-
-const BOX_FOOTER: &str = "Run 'box command --help' for a command's options.";
-
-struct Opt {
-    short: char,
-    long: &'static str,
-    description: &'static str,
+    /// Stop all running containers
+    #[command(
+        override_usage = "box stop",
+        before_help = "Stops all running containers, use docker stop for one."
+    )]
+    Stop,
 }
 
-const HELP: Opt = Opt {
-    short: 'h',
-    long: "help",
-    description: "Print help",
-};
+/// The targets are in the description, so the arguments are hidden
+#[derive(Args)]
+struct List {
+    #[arg(value_name = "WHAT", hide = true)]
+    what: Option<ListTarget>,
 
-const EXTENDED: Opt = Opt {
-    short: 'x',
-    long: "extended",
-    description: "Show containers with their IPs and mounts",
-};
+    /// Show containers with their IPs and mounts
+    #[arg(short = 'x', long)]
+    extended: bool,
+}
+
+#[derive(Args)]
+struct Prune {
+    #[arg(value_name = "WHAT", hide = true)]
+    what: Vec<PruneWhat>,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum PruneWhat {
+    Containers,
+    Images,
+    Volumes,
+    /// Every other target
+    All,
+}
+
+impl PruneWhat {
+    fn targets(self) -> &'static [PruneTarget] {
+        match self {
+            Self::Containers => &[PruneTarget::Containers],
+            Self::Images => &[PruneTarget::Images],
+            Self::Volumes => &[PruneTarget::Volumes],
+            Self::All => &PruneTarget::ORDER,
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
     /// No arguments at all
     Dashboard,
-    Help(String),
+    /// Box's help, or the named subcommand's
+    Help(Option<&'static str>),
     List {
         target: ListTarget,
         extended: bool,
@@ -84,209 +117,70 @@ pub enum Command {
     Stop,
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct UsageError {
-    pub message: String,
-    /// Whose help to point to, box's when `None`
-    pub command: Option<&'static str>,
+/// With the settings every subcommand shares
+fn command() -> clap::Command {
+    with_shared_settings(Cli::command()).mut_subcommands(with_shared_settings)
 }
 
-impl UsageError {
-    fn new(message: impl Into<String>, command: Option<&'static str>) -> Self {
-        Self {
-            message: message.into(),
-            command,
-        }
-    }
-
-    /// `box: ...` and where to find the usage
-    pub fn report(&self) -> String {
-        let help = self.command.map_or_else(
-            || PROGRAM.to_string(),
-            |command| format!("{PROGRAM} {command}"),
-        );
-        format!(
-            "{PROGRAM}: {}\nTry '{help} --help' for usage.",
-            self.message
-        )
-    }
+fn with_shared_settings(command: clap::Command) -> clap::Command {
+    command
+        .help_template(HELP_TEMPLATE)
+        .infer_long_args(true)
+        .args_override_self(true)
 }
 
-/// Box's help, which `box` prints when it can't open the dashboard
-pub fn box_help() -> String {
-    help(BOX_HELP, &[HELP], Some(BOX_FOOTER))
+/// Box's help, or the subcommand's, styled as clap styles `--help`; a closed pipe ends it quietly
+pub fn print_help(subcommand: Option<&str>) {
+    let mut command = command();
+    let command = match subcommand {
+        Some(name) => command.find_subcommand_mut(name).expect("a subcommand"),
+        None => &mut command,
+    };
+    let _ = command.print_help();
 }
 
-pub fn parse(args: &[String]) -> Result<Command, UsageError> {
+/// The command, or clap's error, which also carries `--help` and `--version`
+pub fn parse(args: &[String]) -> Result<Command, clap::Error> {
     if args.is_empty() {
         return Ok(Command::Dashboard);
     }
 
-    // Box's options come before the command
-    let mut rest = args;
-    while let Some((arg, after)) = rest.split_first() {
-        if arg == "--" {
-            rest = after;
-            break;
-        }
-        if !is_option(arg) {
-            break;
-        }
-        let (flags, error) = options(arg, &[HELP]);
-        if flags.contains(&'h') {
-            return Ok(Command::Help(box_help()));
-        }
-        if let Some(message) = error {
-            return Err(UsageError::new(message, None));
-        }
-        rest = after;
-    }
-
-    let Some((command, args)) = rest.split_first() else {
-        return Ok(Command::Help(box_help()));
-    };
-    match command.as_str() {
-        "list" => list(args),
-        "prune" => prune(args),
-        "stop" => stop(args),
-        _ => Err(UsageError::new(format!("unknown command: {command}"), None)),
-    }
-}
-
-fn list(args: &[String]) -> Result<Command, UsageError> {
-    let error = |message: String| UsageError::new(message, Some("list"));
-    let Some(Scanned { targets, flags }) = scan(args, &[EXTENDED, HELP]).map_err(error)? else {
-        return Ok(Command::Help(help(LIST_HELP, &[EXTENDED, HELP], None)));
-    };
-    let Some(first) = targets.first() else {
-        return Ok(Command::Help(help(LIST_HELP, &[EXTENDED, HELP], None)));
-    };
-    let target =
-        ListTarget::from_name(first).ok_or_else(|| error(format!("unknown target: {first}")))?;
-    if let Some(extra) = targets.get(1) {
-        return Err(error(format!("unexpected argument: {extra}")));
-    }
-    let extended = flags.contains(&'x');
-    if extended && target != ListTarget::Containers {
-        return Err(error("--extended only works with containers".to_string()));
-    }
-    Ok(Command::List { target, extended })
-}
-
-fn prune(args: &[String]) -> Result<Command, UsageError> {
-    let error = |message: String| UsageError::new(message, Some("prune"));
-    let Some(Scanned { targets, .. }) = scan(args, &[HELP]).map_err(error)? else {
-        return Ok(Command::Help(help(PRUNE_HELP, &[HELP], None)));
-    };
-    if targets.is_empty() {
-        return Ok(Command::Help(help(PRUNE_HELP, &[HELP], None)));
-    }
-    let mut chosen = Vec::new();
-    for target in &targets {
-        let targets = PruneTarget::from_name(target)
-            .ok_or_else(|| error(format!("unknown target: {target}")))?;
-        chosen.extend(targets);
-    }
-    Ok(Command::Prune(
-        PruneTarget::ORDER
-            .into_iter()
-            .filter(|target| chosen.contains(target))
-            .collect(),
-    ))
-}
-
-fn stop(args: &[String]) -> Result<Command, UsageError> {
-    let error = |message: String| UsageError::new(message, Some("stop"));
-    let Some(Scanned { targets, .. }) = scan(args, &[HELP]).map_err(error)? else {
-        return Ok(Command::Help(help(STOP_HELP, &[HELP], None)));
-    };
-    if let Some(extra) = targets.first() {
-        return Err(error(format!("unexpected argument: {extra}")));
-    }
-    Ok(Command::Stop)
-}
-
-struct Scanned {
-    targets: Vec<String>,
-    flags: Vec<char>,
-}
-
-/// The arguments and the options among them, `None` for help, which wins over what follows it
-fn scan(args: &[String], known: &[Opt]) -> Result<Option<Scanned>, String> {
-    let mut targets = Vec::new();
-    let mut flags = Vec::new();
-    let mut args = args.iter();
-    while let Some(arg) = args.next() {
-        if arg == "--" {
-            targets.extend(args.cloned());
-            break;
-        }
-        if !is_option(arg) {
-            targets.push(arg.clone());
-            continue;
-        }
-        let (matched, error) = options(arg, known);
-        for flag in matched {
-            if flag == 'h' {
-                return Ok(None);
+    let mut command = command();
+    let matches = command
+        .try_get_matches_from_mut(std::iter::once(PROGRAM.into()).chain(args.iter().cloned()))?;
+    let cli = Cli::from_arg_matches(&matches)?;
+    Ok(match cli.command {
+        None => Command::Help(None),
+        Some(Commands::List(List { what: None, .. })) => Command::Help(Some(LIST)),
+        Some(Commands::List(List {
+            what: Some(target),
+            extended,
+        })) => {
+            if extended && target != ListTarget::Containers {
+                let list = command.find_subcommand_mut(LIST).expect("list");
+                return Err(list.error(
+                    ErrorKind::ArgumentConflict,
+                    "--extended only works with containers",
+                ));
             }
-            flags.push(flag);
+            Command::List { target, extended }
         }
-        if let Some(message) = error {
-            return Err(message);
+        Some(Commands::Prune(Prune { what })) if what.is_empty() => Command::Help(Some(PRUNE)),
+        Some(Commands::Prune(Prune { what })) => {
+            let chosen: Vec<PruneTarget> = what
+                .iter()
+                .flat_map(|what| what.targets())
+                .copied()
+                .collect();
+            Command::Prune(
+                PruneTarget::ORDER
+                    .into_iter()
+                    .filter(|target| chosen.contains(target))
+                    .collect(),
+            )
         }
-    }
-    Ok(Some(Scanned { targets, flags }))
-}
-
-fn is_option(arg: &str) -> bool {
-    arg.starts_with('-') && arg != "-"
-}
-
-/// The flags an option argument sets, in order, and the error that stopped reading it
-fn options(arg: &str, known: &[Opt]) -> (Vec<char>, Option<String>) {
-    if let Some(long) = arg.strip_prefix("--") {
-        let (name, value) = match long.split_once('=') {
-            Some((name, _)) => (name, true),
-            None => (long, false),
-        };
-        let exact = known.iter().find(|opt| opt.long == name);
-        let prefixed: Vec<&Opt> = known
-            .iter()
-            .filter(|opt| opt.long.starts_with(name))
-            .collect();
-        let opt = match (exact, prefixed.as_slice()) {
-            (Some(opt), _) | (None, &[opt]) => opt,
-            (None, []) => return (Vec::new(), Some(format!("invalid option: {arg}"))),
-            (None, _) => return (Vec::new(), Some(format!("ambiguous option: {arg}"))),
-        };
-        if value {
-            return (Vec::new(), Some(format!("needless argument: {arg}")));
-        }
-        return (vec![opt.short], None);
-    }
-
-    let mut flags = Vec::new();
-    for short in arg.chars().skip(1) {
-        match known.iter().find(|opt| opt.short == short) {
-            Some(opt) => flags.push(opt.short),
-            None => return (flags, Some(format!("invalid option: -{short}"))),
-        }
-    }
-    (flags, None)
-}
-
-/// Like `OptionParser`'s: the text, the options' summary, then the footer
-fn help(text: &str, opts: &[Opt], footer: Option<&str>) -> String {
-    let mut help = format!("{text}\nOptions:\n");
-    for opt in opts {
-        let names = format!("-{}, --{}", opt.short, opt.long);
-        let _ = writeln!(help, "  {names:<OPTION_NAMES_WIDTH$} {}", opt.description);
-    }
-    if let Some(footer) = footer {
-        let _ = write!(help, "\n{footer}\n");
-    }
-    help
+        Some(Commands::Stop) => Command::Stop,
+    })
 }
 
 #[cfg(test)]

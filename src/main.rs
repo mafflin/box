@@ -28,25 +28,21 @@ fn main() -> ExitCode {
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect();
 
-    let result = match cli::parse(&args) {
-        Err(error) => {
-            eprintln!("{}", error.report());
-            return ExitCode::FAILURE;
-        }
-        Ok(Command::Help(help)) => {
-            print(&help);
+    // Clap prints help, the version and usage errors, and exits
+    let command = cli::parse(&args).unwrap_or_else(|e| e.exit());
+    let result = match command {
+        Command::Help(subcommand) => {
+            cli::print_help(subcommand);
             Ok(())
         }
-        Ok(Command::Dashboard)
-            if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() =>
-        {
+        Command::Dashboard if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() => {
             dashboard::run()
         }
-        Ok(Command::Dashboard) => {
-            print(&cli::box_help());
+        Command::Dashboard => {
+            cli::print_help(None);
             Ok(())
         }
-        Ok(command) => commands::run(command),
+        command => commands::run(command),
     };
 
     match result {

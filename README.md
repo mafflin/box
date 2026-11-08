@@ -19,6 +19,7 @@ box                                       # dashboard (help when not in a termin
 box list containers|images|volumes        # containers -x: IPs and mounts too
 box prune containers|images|volumes|all   # containers first, then volumes, then images
 box stop                                  # all running containers
+box --version                             # or -V
 ```
 
 Pruning removes every volume no container uses, named ones too, unlike `docker volume prune`, which since Docker 23 only removes anonymous ones. Containers go first, so a stopped container's volumes go in the same run, unless another container uses them. That holds for `box prune all` and for `p` in the dashboard, where all three are ticked to start with.

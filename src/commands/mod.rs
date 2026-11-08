@@ -15,27 +15,12 @@ use crate::{Result, print};
 
 /// Each container's image ID
 const CONTAINER_IMAGE_FORMAT: &str = "{{.Image}}";
-/// The targets `box list` and `box prune` share
-const CONTAINERS: &str = "containers";
-const IMAGES: &str = "images";
-const VOLUMES: &str = "volumes";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What `box list` prints, named on the command line like its variants
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum ListTarget {
     Containers,
     Images,
     Volumes,
-}
-
-impl ListTarget {
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            CONTAINERS => Some(Self::Containers),
-            IMAGES => Some(Self::Images),
-            VOLUMES => Some(Self::Volumes),
-            _ => None,
-        }
-    }
 }
 
 /// Runs a command that needs docker

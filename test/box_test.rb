@@ -26,18 +26,26 @@ class BoxTest < Minitest::Test
     assert_empty docker_calls
   end
 
+  def test_prints_version
+    stdout, _, status = box('-V')
+
+    assert status.success?
+    assert_match(/\Abox \d+\.\d+\.\d+\n\z/, stdout)
+    assert_empty docker_calls
+  end
+
   def test_rejects_invalid_arguments
     {
-      %w[foo] => "unknown command: foo\nTry 'box --help'",
-      %w[list foo] => "unknown target: foo\nTry 'box list --help'",
-      %w[list images -x] => '--extended only works with containers',
-      %w[prune all -z] => 'invalid option: -z',
-      %w[stop now] => 'unexpected argument: now',
+      %w[foo] => "unrecognized subcommand 'foo'\n\nUsage: box [command]",
+      %w[list foo] => "invalid value 'foo' for '[WHAT]'",
+      %w[list images -x] => "--extended only works with containers\n\nUsage: box list",
+      %w[prune all -z] => "unexpected argument '-z' found",
+      %w[stop now] => "unexpected argument 'now' found",
     }.each do |args, message|
       _, stderr, status = box(*args)
 
-      refute status.success?, args
-      assert_includes stderr, "box: #{message}", args
+      assert_equal 2, status.exitstatus, args
+      assert_includes stderr, "error: #{message}", args
     end
     assert_empty docker_calls
   end
