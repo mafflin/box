@@ -4,6 +4,14 @@ A docker helper: a live dashboard of containers, images and volumes, plus `list`
 
 ## Install
 
+With [Homebrew](https://brew.sh), on macOS or Linux, which installs the bash and zsh completion too:
+
+```sh
+brew install ivanouski/tap/box
+```
+
+Or from a clone, with a recent Rust toolchain:
+
 ```sh
 cargo install --locked --path .                 # into ~/.cargo/bin
 stow -d completions -t ~/.completions bash      # bash completion
