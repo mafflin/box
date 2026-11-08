@@ -1,6 +1,6 @@
 //! Box's colors: the ones settings.toml's `theme` can change, by default mostly the terminal's text color and
-//! grays, and the ones that mean something, like a container's state, which it can't. ANSI colors unless a
-//! number or `#rrggbb` is given, so the terminal's theme decides how they look
+//! grays, and the ones that mean something, like a container's state, which it can't. By default only the 16
+//! ANSI colors and no backgrounds, so the terminal's theme decides how they look, light or dark
 
 use ratatui::style::Color;
 use serde::{Deserialize, Deserializer};
@@ -43,7 +43,7 @@ pub struct Theme {
     pub count: Color,
 
     // The dashboard's frame
-    /// The active tab, key hints, the sorted column, dialogs
+    /// The active tab, the selection, key hints, the sorted column, dialogs
     #[serde(deserialize_with = "color")]
     pub accent: Color,
     /// Labels and what keys do
@@ -54,14 +54,6 @@ pub struct Theme {
     pub dim: Color,
     #[serde(deserialize_with = "color")]
     pub border: Color,
-    /// Behind the header, tabs, footer and dialogs
-    #[serde(deserialize_with = "color")]
-    pub bar: Color,
-    /// Behind every other row, graphs, and what's behind a dialog
-    #[serde(deserialize_with = "color")]
-    pub stripe: Color,
-    #[serde(deserialize_with = "color")]
-    pub selected: Color,
 
     // A container's graphs
     /// The CPU graph and its value
@@ -107,11 +99,7 @@ impl Default for Theme {
             accent: Color::Yellow,
             muted: Color::Gray,
             dim: Color::DarkGray,
-            // Grays of the 256, for a dark terminal
-            border: Color::Indexed(239),
-            bar: Color::Indexed(237),
-            stripe: Color::Indexed(236),
-            selected: Color::Indexed(239),
+            border: Color::DarkGray,
 
             // A container's graphs
             cpu: Color::Green,

@@ -19,13 +19,10 @@
 # created = "dark-gray"
 # count = "default"    # how many containers use it, the dashboard dims none
 # # The dashboard's frame
-# accent = "yellow"    # the active tab, key hints, the sorted column, dialogs
+# accent = "yellow"    # the active tab, the selection, key hints, the sorted column, dialogs
 # muted = "gray"       # labels and what keys do
 # dim = "dark-gray"    # stopped rows, empty values, disabled keys
-# border = 239
-# bar = 237            # behind the header, tabs, footer and dialogs
-# stripe = 236         # behind every other row and the graphs
-# selected = 239
+# border = "dark-gray"
 # # A container's graphs
 # cpu = "green"
 # memory = "blue"      # its value turns yellow and red as memory fills

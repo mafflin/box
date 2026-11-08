@@ -34,7 +34,7 @@ fn draw_tabs(buf: &mut Buffer, area: Rect, app: &App) -> u16 {
         let style = if view == app.view {
             badge(theme.accent)
         } else {
-            fg(theme.muted).bg(theme.bar)
+            fg(theme.muted)
         };
         x = put(buf, x, area.y, &label, style, area.right()) + TAB_GAP;
     }

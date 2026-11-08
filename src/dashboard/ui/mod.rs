@@ -51,7 +51,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
     let theme = app.theme;
     let buf = frame.buffer_mut();
-    fill(buf, area, theme.text, Color::Reset);
+    fill(buf, area, theme.text);
     if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
         put(
             buf,
@@ -142,8 +142,12 @@ pub fn bold(color: Color) -> Style {
 pub fn badge(color: Color) -> Style {
     Style::new()
         .fg(color)
-        .bg(Color::Reset)
         .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+}
+
+/// Marks `area`, already drawn, as selected: a badge of the accent, like the active tab
+fn highlight(buf: &mut Buffer, area: Rect, theme: &Theme) {
+    buf.set_style(area, badge(theme.accent));
 }
 
 /// Writes `text` up to `end`, the column after where it's written
@@ -184,12 +188,12 @@ fn padded(inner: Rect) -> Rect {
     }
 }
 
-/// Blanks the area in these colors
-fn fill(buf: &mut Buffer, area: Rect, fg: Color, bg: Color) {
+/// Blanks the area, its text in `fg`
+fn fill(buf: &mut Buffer, area: Rect, fg: Color) {
     for position in area.intersection(buf.area).positions() {
         let cell = &mut buf[position];
         cell.reset();
-        cell.set_fg(fg).set_bg(bg);
+        cell.set_fg(fg);
     }
 }
 
@@ -240,12 +244,8 @@ fn rounded_box(
 fn dim(buf: &mut Buffer, area: Rect, theme: &Theme) {
     for position in area.intersection(buf.area).positions() {
         let cell = &mut buf[position];
-        let colored = cell.bg != Color::Reset || cell.modifier.contains(Modifier::REVERSED);
         cell.fg = theme.dim;
         cell.modifier = Modifier::empty();
-        if colored {
-            cell.bg = theme.stripe;
-        }
     }
 }
 

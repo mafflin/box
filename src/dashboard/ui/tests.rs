@@ -73,10 +73,7 @@ fn styles() {
     let tab = &buffer[(2, 0)];
     assert_eq!((tab.fg, tab.bg), (theme.accent, Color::Reset));
     assert!(tab.modifier.contains(Modifier::REVERSED));
-    // The selected row, a zebra row and the stopped container
-    assert_eq!(buffer[(3, 3)].bg, theme.selected);
-    assert_eq!(buffer[(3, 4)].bg, theme.stripe);
-    assert!(!buffer[(3, 3)].modifier.contains(Modifier::BOLD));
+    // The stopped container
     assert_eq!(buffer[(3, 7)].fg, theme.dim);
 
     // How many containers use a volume, dimmed for none
@@ -121,6 +118,46 @@ fn styles() {
         .count();
     let cell = &buffer[(u16::try_from(x).unwrap(), u16::try_from(y).unwrap())];
     assert_eq!(cell.fg, theme.yellow);
+}
+
+#[test]
+fn selection() {
+    let mut app = sample::app();
+    let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
+    // The selected row reversed like the active tab, bold in the accent
+    terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+    let selected = &terminal.backend().buffer()[(3, 3)];
+    assert_eq!(selected.fg, app.theme.accent);
+    assert!(
+        selected
+            .modifier
+            .contains(Modifier::REVERSED | Modifier::BOLD)
+    );
+
+    // The stopped container: its dimmed text in the accent too, like the rest of the row
+    press(&mut app, "jjjj");
+    app.theme.accent = Color::Cyan;
+    terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+    let selected = &terminal.backend().buffer()[(3, 7)];
+    assert_eq!(selected.fg, Color::Cyan);
+    assert!(selected.modifier.contains(Modifier::REVERSED));
+
+    // The prune dialog's current choice
+    press(&mut app, "p");
+    terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let area = buffer.area;
+    let y = (0..area.height)
+        .find(|&y| {
+            let line: String = (0..area.width).map(|x| buffer[(x, y)].symbol()).collect();
+            line.contains('›')
+        })
+        .unwrap();
+    let x = (0..area.width)
+        .find(|&x| buffer[(x, y)].symbol() == "›")
+        .unwrap();
+    assert_eq!(buffer[(x, y)].fg, Color::Cyan);
+    assert!(buffer[(x, y)].modifier.contains(Modifier::REVERSED));
 }
 
 #[test]

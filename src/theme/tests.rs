@@ -7,7 +7,7 @@ fn theme(toml: &str) -> Result<Theme, toml::de::Error> {
 #[test]
 fn colors() {
     let theme = theme(
-        "user = \"Default\"\nimage = \"cyan\"\nports = \"bright-red\"\nid = \"dark-gray\"\nsize = \"grey\"\nborder = 240\nbar = \"#102030\"\n",
+        "user = \"Default\"\nimage = \"cyan\"\nports = \"bright-red\"\nid = \"dark-gray\"\nsize = \"grey\"\nborder = 240\nmuted = \"#102030\"\n",
     )
     .unwrap();
     assert_eq!(theme.user, Color::Reset);
@@ -16,7 +16,7 @@ fn colors() {
     assert_eq!(theme.id, Color::DarkGray);
     assert_eq!(theme.size, Color::Gray);
     assert_eq!(theme.border, Color::Indexed(240));
-    assert_eq!(theme.bar, Color::Rgb(0x10, 0x20, 0x30));
+    assert_eq!(theme.muted, Color::Rgb(0x10, 0x20, 0x30));
     // The rest keep their defaults
     assert_eq!(theme.accent, Color::Yellow);
     assert_eq!(theme.level(0.9, Color::Blue), Color::LightRed);

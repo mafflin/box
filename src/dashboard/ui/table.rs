@@ -5,7 +5,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 
 use super::{
-    NETWORK_MARKS, NO_VALUE, bold, fg, fill, fit, put, put_on_border, rounded_box, size,
+    NETWORK_MARKS, NO_VALUE, bold, fg, fit, highlight, put, put_on_border, rounded_box, size,
     sort_arrow, width,
 };
 use crate::dashboard::app::{App, Pending, Sort, SortKey, View};
@@ -107,25 +107,15 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
     let scroll = scroll(&mut app.scroll[view.index()], selected, height, rows.len());
     for (y, position) in (body.y..body.bottom()).zip(scroll..rows.len()) {
         let row = rows[position];
-        let background = if Some(position) == selected {
-            Some(theme.selected)
-        } else {
-            (position % 2 == 1).then_some(theme.stripe)
-        };
         let row_area = Rect {
             y,
             height: 1,
             ..body
         };
-        draw_row(
-            buf,
-            row_area,
-            &columns,
-            row,
-            dimmed[row],
-            background,
-            &theme,
-        );
+        draw_row(buf, row_area, &columns, row, dimmed[row], &theme);
+        if Some(position) == selected {
+            highlight(buf, row_area, &theme);
+        }
     }
 
     if rows.is_empty() {
@@ -162,7 +152,6 @@ fn draw_header(
     theme: &Theme,
 ) {
     let area = Rect { height: 1, ..inner };
-    fill(buf, area, theme.text, theme.bar);
     let cells = headers.iter().zip(columns).map(|(header, column)| {
         let color = if column.sort == Some(sort.key) {
             theme.accent
@@ -174,19 +163,15 @@ fn draw_header(
     draw_cells(buf, area, columns, cells);
 }
 
-/// A row's cells on its background, dim but for the columns that never are when it's dimmed
+/// A row's cells, dim but for the columns that never are when it's dimmed
 fn draw_row(
     buf: &mut Buffer,
     area: Rect,
     columns: &[Column],
     row: usize,
     dimmed: bool,
-    background: Option<Color>,
     theme: &Theme,
 ) {
-    if let Some(background) = background {
-        fill(buf, area, theme.text, background);
-    }
     let cells = columns.iter().map(|column| {
         let (text, style) = column.cells[row].clone();
         if dimmed && !column.never_dimmed {

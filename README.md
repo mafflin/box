@@ -60,11 +60,11 @@ Optional: `~/.config/box/settings.toml` (or under `$XDG_CONFIG_HOME`). Its `[the
 
 ```toml
 [theme]
-image = "cyan"
-bar = 254
+image = "magenta"
+accent = "cyan"
 ```
 
-A color is `"default"` (the terminal's text color), an ANSI name like `"cyan"`, `"bright-red"`, `"gray"` or `"dark-gray"`, a number of the 256, or `"#rrggbb"`. ANSI names follow the terminal's theme. By default it's the text color and grays with a yellow accent, and the backgrounds are grays 236–239, for a dark terminal.
+A color is `"default"` (the terminal's text color), an ANSI name like `"cyan"`, `"bright-red"`, `"gray"` or `"dark-gray"`, a number of the 256, or `"#rrggbb"`. ANSI names follow the terminal's theme. By default it's only the 16 ANSI colors, the text color and grays with a yellow accent that also marks the active tab and the selection, and no backgrounds, so it looks right on light and dark terminals alike.
 
 ## Tests
 

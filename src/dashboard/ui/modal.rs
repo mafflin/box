@@ -5,7 +5,9 @@ use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::text::{Line, Span};
 
-use super::{badge, bold, fg, fill, fit, padded, put, put_line, rounded_box, size, width};
+use super::{
+    badge, bold, fg, fill, fit, highlight, padded, put, put_line, rounded_box, size, width,
+};
 use crate::commands::PruneTarget;
 use crate::dashboard::app::{App, Confirm, Modal, PruneDialog, SortKey};
 use crate::dashboard::keys::{self, either, names};
@@ -104,15 +106,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App) {
 }
 
 fn help(buf: &mut Buffer, area: Rect, theme: &Theme) {
-    let inner = dialog(
-        buf,
-        area,
-        HELP_WIDTH,
-        HELP_HEIGHT,
-        "Keys",
-        theme.accent,
-        theme.bar,
-    );
+    let inner = dialog(buf, area, HELP_WIDTH, HELP_HEIGHT, "Keys", theme.accent);
     let sections = help_sections();
     help_column(
         buf,
@@ -176,7 +170,6 @@ fn confirmation(buf: &mut Buffer, area: Rect, theme: &Theme, confirm: &Confirm) 
         CONFIRM_HEIGHT,
         &confirm.title,
         color,
-        theme.bar,
     );
     let x = inner.x + INDENT;
     put(
@@ -198,10 +191,7 @@ fn confirmation(buf: &mut Buffer, area: Rect, theme: &Theme, confirm: &Confirm) 
     let buttons = Line::from(vec![
         Span::styled(format!(" {} ", keys::YES), badge(color)),
         Span::styled(" confirm    ", fg(theme.text)),
-        Span::styled(
-            format!(" {} ", keys::NO),
-            bold(theme.text).bg(theme.selected),
-        ),
+        Span::styled(format!(" {} ", keys::NO), badge(theme.text)),
         Span::styled(" cancel", fg(theme.text)),
     ]);
     put_line(buf, x, last_row(inner), &buttons, inner.right());
@@ -209,29 +199,16 @@ fn confirmation(buf: &mut Buffer, area: Rect, theme: &Theme, confirm: &Confirm) 
 
 fn prune(buf: &mut Buffer, area: Rect, app: &App, state: &PruneDialog) {
     let theme = &app.theme;
-    let inner = dialog(
-        buf,
-        area,
-        PRUNE_WIDTH,
-        PRUNE_HEIGHT,
-        "Prune",
-        theme.accent,
-        theme.bar,
-    );
+    let inner = dialog(buf, area, PRUNE_WIDTH, PRUNE_HEIGHT, "Prune", theme.accent);
     let choices = PRUNE_LABELS.iter().zip(app.prunable()).zip(state.chosen);
     let mut y = inner.y + 1;
     for (i, ((label, (count, size)), chosen)) in choices.enumerate() {
         let current = i == state.cursor;
-        if current {
-            fill(
-                buf,
-                Rect::new(inner.x, y, inner.width, 1),
-                theme.text,
-                theme.selected,
-            );
-        }
         let line = prune_choice(theme, label, count, size, chosen, current);
         put_line(buf, inner.x, y, &line, inner.right());
+        if current {
+            highlight(buf, Rect::new(inner.x, y, inner.width, 1), theme);
+        }
         y += 1;
     }
     put(
@@ -316,7 +293,6 @@ fn dialog(
     height: u16,
     title: &str,
     color: Color,
-    background: Color,
 ) -> Rect {
     let width = width.min(area.width.saturating_sub(2));
     let height = height.min(area.height.saturating_sub(2));
@@ -326,6 +302,6 @@ fn dialog(
         width,
         height,
     );
-    fill(buf, outer, color, background);
+    fill(buf, outer, color);
     padded(rounded_box(buf, outer, color, title, bold(color)))
 }

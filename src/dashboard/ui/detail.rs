@@ -9,8 +9,7 @@ use ratatui::text::{Line, Span};
 
 use super::table::{fraction, state_color};
 use super::{
-    DISK_MARKS, NETWORK_MARKS, NO_VALUE, bold, fg, fill, head, padded, put, put_line, rounded_box,
-    size,
+    DISK_MARKS, NETWORK_MARKS, NO_VALUE, bold, fg, head, padded, put, put_line, rounded_box, size,
 };
 use crate::dashboard::app::{App, History, View};
 use crate::dashboard::keys::{self, names};
@@ -490,14 +489,14 @@ fn draw_graphs(buf: &mut Buffer, area: Rect, app: &App, container: &Container) {
         range: cpu_range(peak),
         color: color(theme.cpu),
     };
-    let area = labeled_graph(buf, area, cpu_height, &cpu, &theme);
+    let area = labeled_graph(buf, area, cpu_height, &cpu);
     let memory = Graph {
         label: memory_label(&theme, stats),
         values: &memory,
         range: memory_range(&memory),
         color: color(theme.memory),
     };
-    let area = labeled_graph(buf, area, memory_height, &memory, &theme);
+    let area = labeled_graph(buf, area, memory_height, &memory);
     for (y, line) in (area.y..area.bottom()).zip(&usage) {
         put_line(buf, area.x, y, line, area.right());
     }
@@ -600,7 +599,7 @@ struct Graph<'a> {
 }
 
 /// A label over a graph, the area below them
-fn labeled_graph(buf: &mut Buffer, area: Rect, height: u16, graph: &Graph, theme: &Theme) -> Rect {
+fn labeled_graph(buf: &mut Buffer, area: Rect, height: u16, graph: &Graph) -> Rect {
     put_line(buf, area.x, area.y, &graph.label, area.right());
     let graph_area = Rect::new(
         area.x,
@@ -608,7 +607,7 @@ fn labeled_graph(buf: &mut Buffer, area: Rect, height: u16, graph: &Graph, theme
         area.width,
         height.min(area.height.saturating_sub(1)),
     );
-    draw_bars(buf, graph_area, graph, theme.stripe);
+    draw_bars(buf, graph_area, graph);
     let used = (height + 1).min(area.height);
     Rect {
         y: area.y + used,
@@ -618,9 +617,8 @@ fn labeled_graph(buf: &mut Buffer, area: Rect, height: u16, graph: &Graph, theme
 }
 
 /// Bars in eighths of a cell, the newest on the right
-fn draw_bars(buf: &mut Buffer, area: Rect, graph: &Graph, background: Color) {
+fn draw_bars(buf: &mut Buffer, area: Rect, graph: &Graph) {
     let (low, high) = graph.range;
-    fill(buf, area, graph.color, background);
     let height = f64::from(area.height);
     let per_cell = f64::from(EIGHTHS_PER_CELL);
     let offset = usize::from(area.width).saturating_sub(graph.values.len());

@@ -7,7 +7,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::text::Span;
 
-use super::{BAR_MARGIN, bold, fg, fill, put, put_right, size, width};
+use super::{BAR_MARGIN, bold, fg, put, put_right, size, width};
 use crate::dashboard::app::{App, Logs, Tone, View};
 use crate::dashboard::keys::{self, names};
 use crate::docker::Container;
@@ -64,7 +64,6 @@ fn pinned_hints() -> [Hint; 2] {
 
 pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
     let theme = app.theme;
-    fill(buf, area, theme.muted, theme.bar);
 
     let toast = toast(app);
     let (mut groups, pinned) = hints(app);
