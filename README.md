@@ -60,3 +60,5 @@ A color is `"default"` (the terminal's text color), an ANSI name like `"cyan"`, 
 ## Tests
 
 `rake` runs rubocop, rustfmt, clippy, the unit tests and the Ruby tests in `test/`: both completions' (zsh's are skipped without zsh), and the debug build's against a fake `docker`. Dashboard screens are [insta](https://insta.rs) snapshots in `src/dashboard/ui/snapshots/`: after changing the UI, run `INSTA_UPDATE=always cargo test` and review with `git diff`.
+
+`rake dist` builds static Linux binaries into `dist/`, and a universal macOS binary too when run on a Mac.

@@ -81,13 +81,13 @@ class BoxTest < Minitest::Test
 
   def test_aborts_on_first_failed_docker_command
     running('web', 'db')
-    respond('stop', 'web', status: 1)
+    respond('stop', 'web-id', status: 1)
 
     _, stderr, status = box('stop')
 
     refute status.success?
-    assert_equal "box: docker stop web failed\n", stderr
-    assert_equal [%w[stop web]], changes
+    assert_equal "box: docker stop web-id failed\n", stderr
+    assert_equal [%w[stop web-id]], changes
   end
 
   def test_list_containers_prints_a_table
@@ -193,7 +193,7 @@ class BoxTest < Minitest::Test
   end
 
   def test_list_volumes_prints_a_table
-    containers('db' => [image_id('a'), 'pgdata cache'], 'cron' => [image_id('a'), 'cache'])
+    containers('db' => [image_id('a'), 'pgdata cache'], 'cron' => [image_id('a'), 'cache bind:'])
     volumes(
       'pgdata' => volume_details(created_at: '2026-10-15T09:30:00Z'),
       'cache' => volume_details(driver: 'nfs', created_at: ''),
@@ -244,12 +244,15 @@ class BoxTest < Minitest::Test
     "sha256:#{seed * 64}"
   end
 
-  # Every container mapped to its image ID and the names of its volumes, the container names only label them
+  # Every container mapped to its image ID and its mounts: volume names, or `type:name` for the other types;
+  # the container names only label them
   def containers(usage)
     respond('ps', '-aq', stdout: usage.keys.map { |name| "#{name}-id\n" }.join)
     respond('inspect', '--format', '{{.Image}}', stdout: usage.values.map { |image, _| "#{image}\n" }.join)
-    respond('inspect', '--format', '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}} {{end}}{{end}}',
-            stdout: usage.values.map { |_, volumes| "#{volumes}\n" }.join)
+    mounts = usage.values.map do |_, names|
+      "#{names.to_s.split.map { |name| name.include?(':') ? "#{name} " : "volume:#{name} " }.join}\n"
+    end
+    respond('inspect', '--format', '{{range .Mounts}}{{.Type}}:{{.Name}} {{end}}', stdout: mounts.join)
   end
 
   # Volumes mapped to their docker volume inspect output
@@ -265,7 +268,7 @@ class BoxTest < Minitest::Test
   # Running containers, either names or names mapped to their details, with IDs like `web-id`
   def running(*containers)
     containers = containers.first.is_a?(Hash) ? containers.first : containers.to_h { |name| [name, details] }
-    respond('ps', '--format', '{{.Names}}', stdout: containers.keys.map { |name| "#{name}\n" }.join)
+    respond('ps', '-q', '--no-trunc', stdout: containers.keys.map { |name| "#{name}-id\n" }.join)
     ps = containers.map do |name, (_, status)|
       "#{JSON.generate('ID' => "#{name}-id", 'Names' => name, 'Status' => status)}\n"
     end
