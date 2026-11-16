@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
-    MouseEventKind,
+    KeyModifiers, MouseEventKind,
 };
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
@@ -34,6 +34,8 @@ const TICK: Duration = Duration::from_millis(250);
 const BATCH: usize = 1000;
 /// How long the input thread waits for an event before checking whether it's paused
 const POLL: Duration = Duration::from_millis(50);
+/// How long a lone Esc waits for the rest of a key's escape sequence, which a slow terminal sends in pieces
+const ESC_WAIT: Duration = Duration::from_millis(50);
 /// What `e` runs in the container: bash, else sh
 const SHELL: &str = "command -v bash >/dev/null && exec bash || exec sh";
 /// The most of an error from docker that's kept
@@ -232,12 +234,111 @@ fn forward(
             Ok(None) => continue,
             Err(_) => return,
         };
-        if let Some(action) = action(&event)
-            && actions.send(action).is_err()
-        {
-            return;
+        let events = if is_esc(&event) {
+            after_esc(event, &mut next)
+        } else {
+            vec![event]
+        };
+        for event in events {
+            if let Some(action) = action(&event)
+                && actions.send(action).is_err()
+            {
+                return;
+            }
         }
     }
+}
+
+/// Esc pressed alone, as the terminal's parser reads the first byte of an escape sequence the rest of which
+/// is late. Its release, where the terminal tells of one, is no key of its own
+fn is_esc(event: &Event) -> bool {
+    matches!(event, Event::Key(key) if key.code == KeyCode::Esc
+        && key.modifiers.is_empty()
+        && key.kind == KeyEventKind::Press)
+}
+
+/// What `esc` was: the key whose sequence came in pieces, like ↓ as Esc, `[` and `B`, or Esc itself and
+/// whatever came next when no sequence follows it, which may be another Esc that starts one. A sequence
+/// that's no key box knows, or that breaks off, is dropped, so its start never counts as Esc
+fn after_esc(
+    mut esc: Event,
+    next: &mut impl FnMut(Duration) -> io::Result<Option<Event>>,
+) -> Vec<Event> {
+    let mut events = Vec::new();
+    let mut sequence = String::new();
+    loop {
+        let event = next(ESC_WAIT).ok().flatten();
+        if let Some(c) = sequence_char(event.as_ref())
+            && (!sequence.is_empty() || matches!(c, '[' | 'O'))
+        {
+            sequence.push(c);
+            // After `O` comes one character, after `[` parameters and then a letter or `~`
+            if sequence.len() > 1 && (sequence.starts_with('O') || ('\x40'..='\x7e').contains(&c)) {
+                events.extend(sequence_key(&sequence).map(|code| Event::Key(code.into())));
+                return events;
+            }
+            continue;
+        }
+        // Nothing of a sequence: Esc was itself, unless a sequence began and broke off here
+        if sequence.is_empty() {
+            events.push(esc);
+        }
+        match event {
+            Some(another) if is_esc(&another) => {
+                esc = another;
+                sequence.clear();
+            }
+            other => {
+                events.extend(other);
+                return events;
+            }
+        }
+    }
+}
+
+/// The character `event` adds to an escape sequence: a key pressed without Ctrl or Alt, which the bytes of
+/// a sequence never come with, so Ctrl-C stays itself
+fn sequence_char(event: Option<&Event>) -> Option<char> {
+    match event {
+        Some(Event::Key(key))
+            if key.kind == KeyEventKind::Press
+                && !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            key.code.as_char()
+        }
+        _ => None,
+    }
+}
+
+/// The key an escape sequence stands for, without its Esc. Held with Shift, Ctrl or Alt it's the same key,
+/// as box tells no difference: `[1;5B` is ↓ as `[B` is
+fn sequence_key(sequence: &str) -> Option<KeyCode> {
+    let unmodified = match sequence.split_once(';') {
+        Some((start, modifier)) => {
+            let last = modifier.chars().last()?;
+            let start = if last == '~' {
+                start
+            } else {
+                start.strip_suffix('1').unwrap_or(start)
+            };
+            format!("{start}{last}")
+        }
+        None => sequence.to_string(),
+    };
+    Some(match unmodified.as_str() {
+        "[A" | "OA" => KeyCode::Up,
+        "[B" | "OB" => KeyCode::Down,
+        "[C" | "OC" => KeyCode::Right,
+        "[D" | "OD" => KeyCode::Left,
+        "[H" | "OH" | "[1~" | "[7~" => KeyCode::Home,
+        "[F" | "OF" | "[4~" | "[8~" => KeyCode::End,
+        "[5~" => KeyCode::PageUp,
+        "[6~" => KeyCode::PageDown,
+        "[Z" => KeyCode::BackTab,
+        _ => return None,
+    })
 }
 
 /// The wheel moves as ↑↓ do
